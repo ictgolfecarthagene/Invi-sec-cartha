@@ -1,0 +1,21 @@
+{
+  "name": "Interact Club Tunis Golfe Carthagène Portail",
+  "short_name": "ICTGC Portail",
+  "description": "Portail officiel de gestion des invitations pour les membres",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
