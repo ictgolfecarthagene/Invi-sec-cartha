@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing } from "lucide-react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -10,7 +10,7 @@ const INTERACT_CLUBS = [
 // Utility function required for Web Push Notifications
 const urlBase64ToUint8Array = (base64String) => {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/'); // Fixed regex escape
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -23,6 +23,10 @@ export default function AdminDashboard() {
   // Authentication State
   const [password, setPassword] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
+
+  // Loading States
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
 
   // Form State
   const [eventName, setEventName] = useState("");
@@ -37,6 +41,15 @@ export default function AdminDashboard() {
   const [memberPrice, setMemberPrice] = useState(10);
   const [guestPrice, setGuestPrice] = useState(20);
   const [template, setTemplate] = useState("Aslemaa ,\nVoici la liste des membres de l'ICTGC participant pour [EVENT_NAME]\n\n[LIST]\n\nBonne chance 🫶");
+
+  const handleLogin = () => {
+    // Note: process.env.NEXT_PUBLIC_ADMIN_PASSWORD must be set in your .env.local file
+    if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+      setAuthenticated(true);
+    } else {
+      alert("Mot de passe incorrect");
+    }
+  };
 
   // Authentication View
   if (!authenticated) {
@@ -55,10 +68,10 @@ export default function AdminDashboard() {
             className="w-full bg-gray-50 border-2 border-gray-200 p-4 rounded-2xl mb-6 text-center text-xl font-bold focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 outline-none transition-all"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && password === "secretaire2026" && setAuthenticated(true)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
           />
           <button 
-            onClick={() => password === "secretaire2026" ? setAuthenticated(true) : alert("Mot de passe incorrect")} 
+            onClick={handleLogin} 
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-2xl transition-all shadow-xl shadow-blue-600/20 active:scale-95">
             Déverrouiller
           </button>
@@ -73,6 +86,8 @@ export default function AdminDashboard() {
       alert("Les notifications Push ne sont pas supportées sur ce navigateur.");
       return;
     }
+    
+    setIsSubscribing(true);
     try {
       const registration = await navigator.serviceWorker.register('/sw.js');
       const permission = await window.Notification.requestPermission();
@@ -85,16 +100,20 @@ export default function AdminDashboard() {
 
       const subData = JSON.parse(JSON.stringify(subscription));
 
-      await supabase.from('admin_subscriptions').insert([{
+      const { error } = await supabase.from('admin_subscriptions').insert([{
         endpoint: subData.endpoint,
         p256dh: subData.keys.p256dh,
         auth: subData.keys.auth
       }]);
+      
+      if (error) throw error;
 
       alert('✅ Notifications activées sur ce téléphone !');
     } catch (error) {
       console.error(error);
       alert("Erreur lors de l'activation des notifications.");
+    } finally {
+      setIsSubscribing(false);
     }
   };
 
@@ -105,6 +124,7 @@ export default function AdminDashboard() {
       return;
     }
 
+    setIsSaving(true);
     const { error } = await supabase.from('manual_events').insert([{
       event_name: eventName,
       host_clubs: selectedClubs,
@@ -112,12 +132,13 @@ export default function AdminDashboard() {
       location: location,
       main_paragraph: mainParagraph,
       deadline: deadline,
-      member_price: memberPrice,
-      guest_price: guestPrice,
+      member_price: Number(memberPrice),
+      guest_price: Number(guestPrice),
       guests_allowed: guestsAllowed,
-      guest_limit_per_member: guestLimit,
+      guest_limit_per_member: guestsAllowed ? Number(guestLimit) : 0,
       event_parts: parts
     }]);
+    setIsSaving(false);
 
     if (error) alert("Erreur de sauvegarde: " + error.message);
     else alert("✅ Événement publié avec succès !");
@@ -129,7 +150,7 @@ export default function AdminDashboard() {
     );
   };
 
-  const generateAndCopy = () => {
+  const generateAndCopy = async () => {
     const simulatedRSVPs = [
       { type: "Membre", name: "Yessine Ben Fraj (Cérémonie & Soirée)" },
       { type: "Invité", name: "Yassou (Soirée)" }
@@ -138,8 +159,13 @@ export default function AdminDashboard() {
     let listText = simulatedRSVPs.map(r => `${r.type} :\n- ${r.name}`).join("\n\n");
     let finalMessage = template.replace("[EVENT_NAME]", eventName || "l'événement").replace("[LIST]", listText);
     
-    navigator.clipboard.writeText(finalMessage);
-    alert("✅ Liste copiée dans le presse-papiers !");
+    try {
+      await navigator.clipboard.writeText(finalMessage);
+      alert("✅ Liste copiée dans le presse-papiers !");
+    } catch (err) {
+      console.error('Failed to copy!', err);
+      alert("❌ Erreur lors de la copie.");
+    }
   };
 
   return (
@@ -151,8 +177,12 @@ export default function AdminDashboard() {
           <h1 className="text-3xl font-black flex items-center gap-3 text-gray-900">
             <Settings className="text-blue-600 w-8 h-8" /> Configuration Manuelle
           </h1>
-          <button onClick={enableNotifications} className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md transition-all active:scale-95">
-            <BellRing className="w-5 h-5 text-yellow-400" /> Activer les Alertes
+          <button 
+            onClick={enableNotifications} 
+            disabled={isSubscribing}
+            className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:pointer-events-none">
+            {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} 
+            {isSubscribing ? "Activation..." : "Activer les Alertes"}
           </button>
         </div>
 
@@ -253,8 +283,12 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <button onClick={handleSaveEvent} className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3 transition-all active:scale-95">
-              <Save className="w-6 h-6" /> Publier l'Événement
+            <button 
+              onClick={handleSaveEvent} 
+              disabled={isSaving}
+              className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-70 disabled:pointer-events-none">
+              {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
+              {isSaving ? "Publication en cours..." : "Publier l'Événement"}
             </button>
 
             <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-8 rounded-3xl shadow-lg border border-blue-500 text-white">
