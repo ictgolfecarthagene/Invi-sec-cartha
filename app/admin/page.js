@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar } from "lucide-react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Users } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -42,14 +42,13 @@ export default function AdminDashboard() {
   const [selectedClubs, setSelectedClubs] = useState([]);
   const [memberLimit, setMemberLimit] = useState("");
   const [guestsAllowed, setGuestsAllowed] = useState(false);
-  const [guestLimit, setGuestLimit] = useState(1);
+  const [totalGuestLimit, setTotalGuestLimit] = useState("");
   const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
-  const [template, setTemplate] = useState("Aslemaa ,\nVoici la liste des membres de l'ICTGC participant pour [EVENT_NAME]\n\n[LIST]\n\nBonne chance 🫶");
+  const [template, setTemplate] = useState("Aslemaa ,\nVoici la liste des participants pour [EVENT_NAME]\n\n[LIST]\n\nBonne chance 🫶");
 
-  // Fetch Events on Load
   const fetchEvents = async () => {
     setIsLoadingEvents(true);
-    const { data, error } = await supabase.from('manual_events').select('*').order('created_at', { ascending: false });
+    const { data } = await supabase.from('manual_events').select('*').order('created_at', { ascending: false });
     if (data) setEventsList(data);
     setIsLoadingEvents(false);
   };
@@ -60,11 +59,8 @@ export default function AdminDashboard() {
 
   const handleLogin = (e) => {
     if (e) e.preventDefault();
-    if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
-      setAuthenticated(true);
-    } else {
-      alert("Mot de passe incorrect");
-    }
+    if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) setAuthenticated(true);
+    else alert("Mot de passe incorrect");
   };
 
   const handleAIParsing = async () => {
@@ -86,15 +82,13 @@ export default function AdminDashboard() {
       if (data.location) setLocation(data.location);
       if (data.deadline) setDeadline(data.deadline);
       if (data.hostClubs) setSelectedClubs(data.hostClubs);
-      if (data.memberLimit !== undefined && data.memberLimit !== null) setMemberLimit(data.memberLimit);
+      if (data.memberLimit) setMemberLimit(data.memberLimit);
       if (data.guestsAllowed !== undefined) setGuestsAllowed(data.guestsAllowed);
-      if (data.guestLimit) setGuestLimit(data.guestLimit);
       if (data.parts && data.parts.length > 0) setParts(data.parts);
       
       alert("✅ Données extraites avec succès ! Veuillez vérifier les champs.");
     } catch (error) {
-      console.error(error);
-      alert("❌ Erreur lors de l'analyse par l'IA: " + error.message);
+      alert("❌ Erreur: " + error.message);
     } finally {
       setIsParsing(false);
     }
@@ -108,27 +102,122 @@ export default function AdminDashboard() {
             <Lock className="w-12 h-12 text-blue-600" />
           </div>
           <h2 className="text-3xl font-black text-gray-900 mb-2">Accès Sécurisé</h2>
-          <p className="text-gray-500 mb-8 font-medium">Administration ICTGC</p>
-          
           <form onSubmit={handleLogin}>
             <input type="text" name="username" autoComplete="username" value="admin" readOnly style={{ display: 'none' }} />
             <input 
-              type="password" 
-              name="password"
-              autoComplete="current-password"
-              placeholder="Mot de passe..."
+              type="password" name="password" autoComplete="current-password" placeholder="Mot de passe..."
               className="w-full bg-gray-50 border-2 border-gray-200 p-4 rounded-2xl mb-6 text-center text-xl font-bold focus:border-blue-500 focus:bg-white outline-none"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              value={password} onChange={(e) => setPassword(e.target.value)}
             />
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-2xl shadow-xl active:scale-95">
-              Déverrouiller
-            </button>
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-2xl shadow-xl active:scale-95">Déverrouiller</button>
           </form>
         </div>
       </div>
     );
   }
+
+  const handleSaveEvent = async () => {
+    if (!eventName || !deadline) return alert("Le nom de l'événement et la date limite sont requis.");
+    setIsSaving(true);
+    
+    const payload = {
+      event_name: eventName,
+      host_clubs: selectedClubs,
+      event_date: eventDate,
+      location: location,
+      main_paragraph: mainParagraph,
+      deadline: deadline,
+      member_limit: memberLimit ? Number(memberLimit) : null,
+      guests_allowed: guestsAllowed,
+      total_guest_limit: guestsAllowed && totalGuestLimit ? Number(totalGuestLimit) : null,
+      event_parts: parts
+    };
+
+    let error;
+    if (editingEventId) error = (await supabase.from('manual_events').update(payload).eq('id', editingEventId)).error;
+    else error = (await supabase.from('manual_events').insert([payload])).error;
+
+    setIsSaving(false);
+    
+    if (error) alert("Erreur de sauvegarde: " + error.message);
+    else {
+      alert(editingEventId ? "✅ Événement mis à jour !" : "✅ Événement publié !");
+      resetForm();
+      fetchEvents();
+    }
+  };
+
+  const handleDeleteEvent = async (id) => {
+    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet événement ?")) return;
+    await supabase.from('manual_events').delete().eq('id', id);
+    if (editingEventId === id) resetForm();
+    fetchEvents();
+  };
+
+  const loadEventToEdit = (evt) => {
+    setEditingEventId(evt.id);
+    setEventName(evt.event_name || "");
+    setMainParagraph(evt.main_paragraph || "");
+    setEventDate(evt.event_date || "");
+    setDeadline(evt.deadline || "");
+    setLocation(evt.location || "");
+    setSelectedClubs(evt.host_clubs || []);
+    setMemberLimit(evt.member_limit || "");
+    setGuestsAllowed(evt.guests_allowed || false);
+    setTotalGuestLimit(evt.total_guest_limit || "");
+    setParts(evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const resetForm = () => {
+    setEditingEventId(null);
+    setEventName("");
+    setMainParagraph("");
+    setEventDate("");
+    setDeadline("");
+    setLocation("");
+    setSelectedClubs([]);
+    setMemberLimit("");
+    setGuestsAllowed(false);
+    setTotalGuestLimit("");
+    setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+    setAiText("");
+  };
+
+  const updatePart = (index, field, value) => {
+    const newParts = [...parts];
+    newParts[index][field] = field === 'name' ? value : Number(value);
+    setParts(newParts);
+  };
+
+  // FETCH REAL RSVPS AND INJECT INTO TEMPLATE
+  const generateAndCopy = async (evt) => {
+    const { data: rsvps } = await supabase.from('rsvps').select('*').eq('event_id', evt.id);
+    
+    let listText = "Aucun participant pour le moment.";
+    
+    if (rsvps && rsvps.length > 0) {
+      listText = rsvps.map((r, i) => {
+        let str = `${i + 1}. ${r.member_name} (${r.selected_parts.join(', ')})`;
+        if (r.guest_name) str += `\n   ↳ Invité: ${r.guest_name}`;
+        return str;
+      }).join("\n");
+    }
+
+    let finalMessage = template.replace("[EVENT_NAME]", evt.event_name).replace("[LIST]", listText);
+    
+    try {
+      await navigator.clipboard.writeText(finalMessage);
+      alert(`✅ Liste des présences pour "${evt.event_name}" copiée dans le presse-papiers !`);
+    } catch (err) {
+      alert("❌ Erreur lors de la copie.");
+    }
+  };
+
+  const sendReminder = async (evt) => {
+    // This will connect to your Push notification route later
+    alert(`🔔 Rappel envoyé à tous les membres pour l'événement: ${evt.event_name}`);
+  };
 
   const enableNotifications = async () => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return alert("Push non supporté.");
@@ -152,144 +241,57 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSaveEvent = async () => {
-    if (!eventName || !deadline) return alert("Le nom de l'événement et la date limite sont requis.");
-    setIsSaving(true);
-    
-    const payload = {
-      event_name: eventName,
-      host_clubs: selectedClubs,
-      event_date: eventDate,
-      location: location,
-      main_paragraph: mainParagraph,
-      deadline: deadline,
-      member_limit: memberLimit ? Number(memberLimit) : null,
-      guests_allowed: guestsAllowed,
-      guest_limit_per_member: guestsAllowed ? Number(guestLimit) : 0,
-      event_parts: parts
-    };
-
-    let error;
-    if (editingEventId) {
-      const res = await supabase.from('manual_events').update(payload).eq('id', editingEventId);
-      error = res.error;
-    } else {
-      const res = await supabase.from('manual_events').insert([payload]);
-      error = res.error;
-    }
-
-    setIsSaving(false);
-    
-    if (error) {
-      alert("Erreur de sauvegarde: " + error.message);
-    } else {
-      alert(editingEventId ? "✅ Événement mis à jour avec succès !" : "✅ Événement publié avec succès !");
-      resetForm();
-      fetchEvents();
-    }
-  };
-
-  const handleDeleteEvent = async (id) => {
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet événement ?")) return;
-    const { error } = await supabase.from('manual_events').delete().eq('id', id);
-    if (error) alert("Erreur lors de la suppression.");
-    else {
-      if (editingEventId === id) resetForm();
-      fetchEvents();
-    }
-  };
-
-  const loadEventToEdit = (evt) => {
-    setEditingEventId(evt.id);
-    setEventName(evt.event_name || "");
-    setMainParagraph(evt.main_paragraph || "");
-    setEventDate(evt.event_date || "");
-    setDeadline(evt.deadline || "");
-    setLocation(evt.location || "");
-    setSelectedClubs(evt.host_clubs || []);
-    setMemberLimit(evt.member_limit || "");
-    setGuestsAllowed(evt.guests_allowed || false);
-    setGuestLimit(evt.guest_limit_per_member || 1);
-    setParts(evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const resetForm = () => {
-    setEditingEventId(null);
-    setEventName("");
-    setMainParagraph("");
-    setEventDate("");
-    setDeadline("");
-    setLocation("");
-    setSelectedClubs([]);
-    setMemberLimit("");
-    setGuestsAllowed(false);
-    setGuestLimit(1);
-    setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
-    setAiText("");
-  };
-
-  const toggleClub = (club) => setSelectedClubs(prev => prev.includes(club) ? prev.filter(c => c !== club) : [...prev, club]);
-
-  const updatePart = (index, field, value) => {
-    const newParts = [...parts];
-    newParts[index][field] = field === 'name' ? value : Number(value);
-    setParts(newParts);
-  };
-
-  const generateAndCopy = async () => {
-    let finalMessage = template.replace("[EVENT_NAME]", eventName || "l'événement").replace("[LIST]", "Liste simulée...");
-    try {
-      await navigator.clipboard.writeText(finalMessage);
-      alert("✅ Template copié dans le presse-papiers !");
-    } catch (err) {
-      alert("❌ Erreur lors de la copie.");
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto space-y-8">
         
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
-          <h1 className="text-3xl font-black flex items-center gap-3 text-gray-900">
-            <Settings className="text-blue-600 w-8 h-8" /> Configuration Manuelle
-          </h1>
+          <h1 className="text-3xl font-black flex items-center gap-3 text-gray-900"><Settings className="text-blue-600 w-8 h-8" /> Administration</h1>
           <button onClick={enableNotifications} disabled={isSubscribing} className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
-            {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} 
-            {isSubscribing ? "Activation..." : "Activer les Alertes"}
+            {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} Activer les Alertes
           </button>
+        </div>
+
+        {/* Custom Template Editor */}
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
+          <h2 className="font-bold text-xl mb-4 text-gray-800">Template de Message (Pour la Secrétaire)</h2>
+          <p className="text-xs text-gray-500 mb-4">Utilisez [EVENT_NAME] et [LIST] pour injecter les données automatiquement.</p>
+          <textarea 
+            value={template} 
+            onChange={(e) => setTemplate(e.target.value)} 
+            className="w-full h-32 bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm font-medium focus:outline-none focus:border-blue-500 resize-none"
+          />
         </div>
 
         {/* Existing Events Manager */}
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
           <div className="flex justify-between items-center mb-6 border-b pb-3">
             <h2 className="font-bold text-xl text-gray-800">Événements Existants</h2>
-            {editingEventId && (
-              <button onClick={resetForm} className="text-sm bg-blue-100 text-blue-600 px-4 py-2 rounded-lg font-bold hover:bg-blue-200 flex items-center gap-2">
-                <X className="w-4 h-4" /> Annuler l'édition
-              </button>
-            )}
+            {editingEventId && <button onClick={resetForm} className="text-sm bg-blue-100 text-blue-600 px-4 py-2 rounded-lg font-bold hover:bg-blue-200 flex items-center gap-2"><X className="w-4 h-4" /> Annuler l'édition</button>}
           </div>
           
           {isLoadingEvents ? (
-            <div className="flex items-center justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+            <div className="flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
           ) : eventsList.length === 0 ? (
-            <p className="text-gray-500 text-sm italic">Aucun événement trouvé dans la base de données.</p>
+            <p className="text-gray-500 text-sm italic">Aucun événement trouvé.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {eventsList.map(evt => (
-                <div key={evt.id} className={`p-4 border-2 rounded-2xl ${editingEventId === evt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
-                  <h3 className="font-bold text-gray-900 truncate">{evt.event_name}</h3>
-                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-1"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
-                  <div className="flex gap-2 mt-4">
-                    <button onClick={() => loadEventToEdit(evt)} className="flex-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-xs font-bold hover:bg-gray-100 flex items-center justify-center gap-1">
-                      <Edit className="w-3 h-3" /> Éditer
+                <div key={evt.id} className={`p-5 border-2 rounded-2xl ${editingEventId === evt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+                  <h3 className="font-bold text-gray-900 truncate text-lg mb-2">{evt.event_name}</h3>
+                  <p className="text-xs text-gray-500 flex items-center gap-1 mb-4"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
+                  
+                  <div className="space-y-2">
+                    <button onClick={() => generateAndCopy(evt)} className="w-full bg-blue-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
+                      <Copy className="w-4 h-4" /> Copier la liste des participants
                     </button>
-                    <button onClick={() => handleDeleteEvent(evt.id)} className="bg-red-50 text-red-600 px-3 py-2 rounded-lg hover:bg-red-100 flex items-center justify-center">
-                      <Trash2 className="w-4 h-4" />
+                    <button onClick={() => sendReminder(evt)} className="w-full bg-yellow-500 text-yellow-950 py-2 rounded-lg text-xs font-bold hover:bg-yellow-600 flex items-center justify-center gap-2">
+                      <BellRing className="w-4 h-4" /> Envoyer un Rappel
                     </button>
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={() => loadEventToEdit(evt)} className="flex-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-xs font-bold hover:bg-gray-100 flex items-center justify-center gap-1"><Edit className="w-3 h-3" /> Éditer</button>
+                      <button onClick={() => handleDeleteEvent(evt.id)} className="bg-red-50 text-red-600 px-3 py-2 rounded-lg hover:bg-red-100 flex items-center justify-center"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -297,55 +299,56 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* AI Integration */}
-        <div className="bg-gradient-to-br from-indigo-900 to-blue-900 p-8 rounded-3xl shadow-lg border border-indigo-700">
-          <h2 className="text-2xl font-black flex items-center gap-3 text-white mb-4">
-            <Sparkles className="text-yellow-400 w-6 h-6" /> Assistant IA
-          </h2>
-          <p className="text-indigo-200 mb-6 text-sm font-medium">Collez le texte brut de l'invitation ici. L'IA va remplir tous les champs automatiquement pour vous.</p>
-          <textarea 
-            value={aiText} 
-            onChange={e => setAiText(e.target.value)}
-            placeholder="Chers amis, le club Interact organise sa cérémonie le..."
-            className="w-full h-32 bg-white/10 border-2 border-indigo-400/50 p-4 rounded-xl mb-6 text-white placeholder-indigo-300 focus:outline-none focus:border-yellow-400 transition-colors resize-none"
-          />
-          <button 
-            onClick={handleAIParsing} 
-            disabled={isParsing}
-            className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-black text-lg py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-70 flex justify-center items-center gap-2">
-            {isParsing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-            {isParsing ? "Analyse en cours..." : "Auto-remplir avec l'IA"}
-          </button>
-        </div>
-
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           <div className="xl:col-span-2 space-y-8">
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-              <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">
-                {editingEventId ? "Édition de l'événement" : "Créer un événement"}
-              </h2>
+              <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">{editingEventId ? "Édition de l'événement" : "Créer un événement"}</h2>
               <input type="text" placeholder="Nom de l'événement" className="w-full border-2 border-gray-100 p-4 rounded-xl mb-5 bg-gray-50 focus:border-blue-500 outline-none font-medium" value={eventName} onChange={e => setEventName(e.target.value)} />
-              <textarea placeholder="Paragraphe principal de l'invitation..." className="w-full h-40 border-2 border-gray-100 p-4 rounded-xl mb-5 bg-gray-50 focus:border-blue-500 outline-none resize-none" value={mainParagraph} onChange={e => setMainParagraph(e.target.value)} />
+              <textarea placeholder="Paragraphe principal..." className="w-full h-40 border-2 border-gray-100 p-4 rounded-xl mb-5 bg-gray-50 focus:border-blue-500 outline-none resize-none" value={mainParagraph} onChange={e => setMainParagraph(e.target.value)} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Date</label>
-                  <input type="text" placeholder="Ex: 20 Août à 18h" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none mt-1" value={eventDate} onChange={e => setEventDate(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Lieu</label>
-                  <input type="text" placeholder="Ex: Hammamet Nord" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none mt-1" value={location} onChange={e => setLocation(e.target.value)} />
-                </div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Date</label><input type="text" placeholder="Ex: 20 Août à 18h" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={eventDate} onChange={e => setEventDate(e.target.value)} /></div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Lieu</label><input type="text" placeholder="Ex: Hammamet Nord" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={location} onChange={e => setLocation(e.target.value)} /></div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-                <div>
-                  <label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label>
-                  <input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 focus:border-red-500 outline-none mt-1 text-red-900 font-medium" value={deadline} onChange={e => setDeadline(e.target.value)} required />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Limite totale de membres (Optionnel)</label>
-                  <input type="number" placeholder="Ex: 50 (Vide si illimité)" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none mt-1" value={memberLimit} onChange={e => setMemberLimit(e.target.value)} />
-                </div>
+                <div><label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label><input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 mt-1" value={deadline} onChange={e => setDeadline(e.target.value)} required /></div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Limite totale de membres (Optionnel)</label><input type="number" placeholder="Ex: 50" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={memberLimit} onChange={e => setMemberLimit(e.target.value)} /></div>
               </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-indigo-900 to-blue-900 p-8 rounded-3xl shadow-lg border border-indigo-700">
+              <h2 className="text-2xl font-black flex items-center gap-3 text-white mb-4"><Sparkles className="text-yellow-400 w-6 h-6" /> Assistant IA</h2>
+              <textarea value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Collez l'invitation ici..." className="w-full h-32 bg-white/10 border-2 border-indigo-400/50 p-4 rounded-xl mb-6 text-white placeholder-indigo-300 focus:outline-none focus:border-yellow-400 resize-none" />
+              <button onClick={handleAIParsing} disabled={isParsing} className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-black text-lg py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-70 flex justify-center items-center gap-2">
+                {isParsing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} Auto-remplir avec l'IA
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
+              <div className="flex justify-between items-center mb-6 border-b pb-3"><h2 className="font-bold text-xl text-gray-800">Programme & Prix</h2><button onClick={() => setParts([...parts, { name: "Nouveau", memberPrice: 0, guestPrice: 0 }])} className="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-200"><Plus className="w-5 h-5"/></button></div>
+              <div className="space-y-6">
+                {parts.map((part, index) => (
+                  <div key={index} className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
+                    <div className="flex gap-2">
+                      <input type="text" placeholder="Nom (ex: Soirée)" value={part.name} onChange={(e) => updatePart(index, 'name', e.target.value)} className="flex-1 border border-gray-300 p-2 rounded-lg text-sm font-bold" />
+                      <button onClick={() => setParts(parts.filter((_, i) => i !== index))} className="bg-red-50 text-red-500 p-2 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex-1"><label className="text-[10px] uppercase font-bold text-gray-500">Interactien</label><input type="number" value={part.memberPrice} onChange={(e) => updatePart(index, 'memberPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
+                      <div className="flex-1"><label className="text-[10px] uppercase font-bold text-gray-500">Invité</label><input type="number" value={part.guestPrice} onChange={(e) => updatePart(index, 'guestPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <hr className="my-6 border-gray-200" />
+              <div className="flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl bg-gray-50 mb-4">
+                <span className="font-bold text-gray-700">Autoriser les invités ?</span>
+                <input type="checkbox" className="w-6 h-6 rounded text-blue-600" checked={guestsAllowed} onChange={e => setGuestsAllowed(e.target.checked)} />
+              </div>
+              {guestsAllowed && (
+                <div><label className="text-xs font-bold text-gray-500 uppercase">Limite totale d'invités (L'événement)</label><input type="number" placeholder="Ex: 20 (vide si illimité)" className="w-full border-2 border-gray-100 p-3 rounded-xl bg-gray-50 mt-1 font-bold" value={totalGuestLimit} onChange={e => setTotalGuestLimit(e.target.value)} /></div>
+              )}
             </div>
 
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
@@ -359,51 +362,9 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
-          </div>
 
-          <div className="space-y-8">
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-              <div className="flex justify-between items-center mb-6 border-b pb-3">
-                <h2 className="font-bold text-xl text-gray-800">Programme & Prix</h2>
-                <button onClick={() => setParts([...parts, { name: "Nouveau", memberPrice: 0, guestPrice: 0 }])} className="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-200"><Plus className="w-5 h-5"/></button>
-              </div>
-              <div className="space-y-6">
-                {parts.map((part, index) => (
-                  <div key={index} className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
-                    <div className="flex gap-2">
-                      <input type="text" placeholder="Nom (ex: Soirée)" value={part.name} onChange={(e) => updatePart(index, 'name', e.target.value)} className="flex-1 border border-gray-300 p-2 rounded-lg text-sm font-bold outline-none focus:border-blue-500" />
-                      <button onClick={() => setParts(parts.filter((_, i) => i !== index))} className="bg-red-50 text-red-500 p-2 rounded-lg"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                    <div className="flex gap-2">
-                      <div className="flex-1">
-                        <label className="text-[10px] uppercase font-bold text-gray-500">Prix Interactien</label>
-                        <input type="number" value={part.memberPrice} onChange={(e) => updatePart(index, 'memberPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold outline-none" />
-                      </div>
-                      <div className="flex-1">
-                        <label className="text-[10px] uppercase font-bold text-gray-500">Prix Invité</label>
-                        <input type="number" value={part.guestPrice} onChange={(e) => updatePart(index, 'guestPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold outline-none" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              <hr className="my-6 border-gray-200" />
-              <div className="flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl bg-gray-50 mb-4">
-                <span className="font-bold text-gray-700">Autoriser les invités ?</span>
-                <input type="checkbox" className="w-6 h-6 rounded text-blue-600 focus:ring-blue-500" checked={guestsAllowed} onChange={e => setGuestsAllowed(e.target.checked)} />
-              </div>
-              {guestsAllowed && (
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase">Limite par membre</label>
-                  <input type="number" className="w-full border-2 border-gray-100 p-3 rounded-xl bg-gray-50 mt-1 font-bold" value={guestLimit} onChange={e => setGuestLimit(e.target.value)} />
-                </div>
-              )}
-            </div>
-
-            <button onClick={handleSaveEvent} disabled={isSaving} className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3 disabled:opacity-70">
-              {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
-              {isSaving ? "Sauvegarde en cours..." : (editingEventId ? "Mettre à jour l'Événement" : "Publier l'Événement")}
+            <button onClick={handleSaveEvent} disabled={isSaving} className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3">
+              {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />} {editingEventId ? "Mettre à jour" : "Publier l'Événement"}
             </button>
           </div>
         </div>
