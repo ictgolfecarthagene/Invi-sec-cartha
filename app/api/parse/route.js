@@ -2,7 +2,6 @@ import { GoogleGenAI } from "@google/genai";
 
 export async function POST(req) {
   try {
-    // 1. Check if the API key is actually loaded
     if (!process.env.GEMINI_API_KEY) {
       return Response.json({ error: "La clé API GEMINI_API_KEY est manquante." }, { status: 500 });
     }
@@ -20,6 +19,7 @@ export async function POST(req) {
       "eventDate": "String (e.g., 20 Août 2026 à 18h)",
       "location": "String (Name of place or maps link)",
       "deadline": "YYYY-MM-DDTHH:MM (Convert the deadline to an ISO datetime string)",
+      "memberLimit": Number (Maximum total number of members allowed to attend. Return null if unlimited or not mentioned),
       "guestsAllowed": Boolean (True if guests/invités are allowed, false if strictly members only),
       "guestLimit": Number (How many guests per member, default 1 if allowed but not specified),
       "mainParagraph": "String (The full invitation message body, exactly as written)",
@@ -44,7 +44,6 @@ export async function POST(req) {
 
     let rawText = response.text;
     
-    // 2. Clean up markdown if the AI includes it accidentally
     if (rawText.startsWith('```json')) {
       rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     } else if (rawText.startsWith('```')) {
@@ -54,7 +53,6 @@ export async function POST(req) {
     return Response.json(JSON.parse(rawText));
 
   } catch (error) {
-    // 3. Send the REAL error to the frontend so we can debug it
     console.error("Détails de l'erreur IA:", error);
     return Response.json({ error: error.message || "Erreur interne de l'IA" }, { status: 500 });
   }

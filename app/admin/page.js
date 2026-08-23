@@ -40,6 +40,7 @@ export default function AdminDashboard() {
   const [deadline, setDeadline] = useState("");
   const [location, setLocation] = useState("");
   const [selectedClubs, setSelectedClubs] = useState([]);
+  const [memberLimit, setMemberLimit] = useState("");
   const [guestsAllowed, setGuestsAllowed] = useState(false);
   const [guestLimit, setGuestLimit] = useState(1);
   const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
@@ -58,7 +59,7 @@ export default function AdminDashboard() {
   }, [authenticated]);
 
   const handleLogin = (e) => {
-    if (e) e.preventDefault(); // Prevent page reload on form submit
+    if (e) e.preventDefault();
     if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
       setAuthenticated(true);
     } else {
@@ -77,7 +78,6 @@ export default function AdminDashboard() {
       });
       const data = await response.json();
       
-      // Strict Error Checking
       if (!response.ok) throw new Error(data.error || "Erreur API inconnue");
       
       if (data.eventName) setEventName(data.eventName);
@@ -86,6 +86,7 @@ export default function AdminDashboard() {
       if (data.location) setLocation(data.location);
       if (data.deadline) setDeadline(data.deadline);
       if (data.hostClubs) setSelectedClubs(data.hostClubs);
+      if (data.memberLimit !== undefined && data.memberLimit !== null) setMemberLimit(data.memberLimit);
       if (data.guestsAllowed !== undefined) setGuestsAllowed(data.guestsAllowed);
       if (data.guestLimit) setGuestLimit(data.guestLimit);
       if (data.parts && data.parts.length > 0) setParts(data.parts);
@@ -109,16 +110,8 @@ export default function AdminDashboard() {
           <h2 className="text-3xl font-black text-gray-900 mb-2">Accès Sécurisé</h2>
           <p className="text-gray-500 mb-8 font-medium">Administration ICTGC</p>
           
-          {/* Wrapped inputs in a form for password managers */}
           <form onSubmit={handleLogin}>
-            <input 
-              type="text" 
-              name="username" 
-              autoComplete="username" 
-              value="admin" 
-              readOnly 
-              style={{ display: 'none' }} 
-            />
+            <input type="text" name="username" autoComplete="username" value="admin" readOnly style={{ display: 'none' }} />
             <input 
               type="password" 
               name="password"
@@ -170,6 +163,7 @@ export default function AdminDashboard() {
       location: location,
       main_paragraph: mainParagraph,
       deadline: deadline,
+      member_limit: memberLimit ? Number(memberLimit) : null,
       guests_allowed: guestsAllowed,
       guest_limit_per_member: guestsAllowed ? Number(guestLimit) : 0,
       event_parts: parts
@@ -213,6 +207,7 @@ export default function AdminDashboard() {
     setDeadline(evt.deadline || "");
     setLocation(evt.location || "");
     setSelectedClubs(evt.host_clubs || []);
+    setMemberLimit(evt.member_limit || "");
     setGuestsAllowed(evt.guests_allowed || false);
     setGuestLimit(evt.guest_limit_per_member || 1);
     setParts(evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
@@ -227,6 +222,7 @@ export default function AdminDashboard() {
     setDeadline("");
     setLocation("");
     setSelectedClubs([]);
+    setMemberLimit("");
     setGuestsAllowed(false);
     setGuestLimit(1);
     setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
@@ -340,9 +336,15 @@ export default function AdminDashboard() {
                   <input type="text" placeholder="Ex: Hammamet Nord" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none mt-1" value={location} onChange={e => setLocation(e.target.value)} />
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label>
-                <input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 focus:border-red-500 outline-none mt-1 text-red-900 font-medium" value={deadline} onChange={e => setDeadline(e.target.value)} required />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                <div>
+                  <label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label>
+                  <input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 focus:border-red-500 outline-none mt-1 text-red-900 font-medium" value={deadline} onChange={e => setDeadline(e.target.value)} required />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Limite totale de membres (Optionnel)</label>
+                  <input type="number" placeholder="Ex: 50 (Vide si illimité)" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none mt-1" value={memberLimit} onChange={e => setMemberLimit(e.target.value)} />
+                </div>
               </div>
             </div>
 
