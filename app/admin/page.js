@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -26,6 +26,11 @@ export default function AdminDashboard() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+
+  // Event Management State
+  const [eventsList, setEventsList] = useState([]);
+  const [editingEventId, setEditingEventId] = useState(null);
 
   // Form State
   const [aiText, setAiText] = useState("");
@@ -39,6 +44,18 @@ export default function AdminDashboard() {
   const [guestLimit, setGuestLimit] = useState(1);
   const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
   const [template, setTemplate] = useState("Aslemaa ,\nVoici la liste des membres de l'ICTGC participant pour [EVENT_NAME]\n\n[LIST]\n\nBonne chance 🫶");
+
+  // Fetch Events on Load
+  const fetchEvents = async () => {
+    setIsLoadingEvents(true);
+    const { data, error } = await supabase.from('manual_events').select('*').order('created_at', { ascending: false });
+    if (data) setEventsList(data);
+    setIsLoadingEvents(false);
+  };
+
+  useEffect(() => {
+    if (authenticated) fetchEvents();
+  }, [authenticated]);
 
   const handleLogin = () => {
     if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
@@ -59,6 +76,9 @@ export default function AdminDashboard() {
       });
       const data = await response.json();
       
+      // Strict Error Checking
+      if (!response.ok) throw new Error(data.error || "Erreur API inconnue");
+      
       if (data.eventName) setEventName(data.eventName);
       if (data.mainParagraph) setMainParagraph(data.mainParagraph);
       if (data.eventDate) setEventDate(data.eventDate);
@@ -72,7 +92,7 @@ export default function AdminDashboard() {
       alert("✅ Données extraites avec succès ! Veuillez vérifier les champs.");
     } catch (error) {
       console.error(error);
-      alert("❌ Erreur lors de l'analyse par l'IA.");
+      alert("❌ Erreur lors de l'analyse par l'IA: " + error.message);
     } finally {
       setIsParsing(false);
     }
@@ -128,7 +148,8 @@ export default function AdminDashboard() {
   const handleSaveEvent = async () => {
     if (!eventName || !deadline) return alert("Le nom de l'événement et la date limite sont requis.");
     setIsSaving(true);
-    const { error } = await supabase.from('manual_events').insert([{
+    
+    const payload = {
       event_name: eventName,
       host_clubs: selectedClubs,
       event_date: eventDate,
@@ -138,10 +159,64 @@ export default function AdminDashboard() {
       guests_allowed: guestsAllowed,
       guest_limit_per_member: guestsAllowed ? Number(guestLimit) : 0,
       event_parts: parts
-    }]);
+    };
+
+    let error;
+    if (editingEventId) {
+      const res = await supabase.from('manual_events').update(payload).eq('id', editingEventId);
+      error = res.error;
+    } else {
+      const res = await supabase.from('manual_events').insert([payload]);
+      error = res.error;
+    }
+
     setIsSaving(false);
-    if (error) alert("Erreur de sauvegarde: " + error.message);
-    else alert("✅ Événement publié avec succès !");
+    
+    if (error) {
+      alert("Erreur de sauvegarde: " + error.message);
+    } else {
+      alert(editingEventId ? "✅ Événement mis à jour avec succès !" : "✅ Événement publié avec succès !");
+      resetForm();
+      fetchEvents();
+    }
+  };
+
+  const handleDeleteEvent = async (id) => {
+    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet événement ?")) return;
+    const { error } = await supabase.from('manual_events').delete().eq('id', id);
+    if (error) alert("Erreur lors de la suppression.");
+    else {
+      if (editingEventId === id) resetForm();
+      fetchEvents();
+    }
+  };
+
+  const loadEventToEdit = (evt) => {
+    setEditingEventId(evt.id);
+    setEventName(evt.event_name || "");
+    setMainParagraph(evt.main_paragraph || "");
+    setEventDate(evt.event_date || "");
+    setDeadline(evt.deadline || "");
+    setLocation(evt.location || "");
+    setSelectedClubs(evt.host_clubs || []);
+    setGuestsAllowed(evt.guests_allowed || false);
+    setGuestLimit(evt.guest_limit_per_member || 1);
+    setParts(evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const resetForm = () => {
+    setEditingEventId(null);
+    setEventName("");
+    setMainParagraph("");
+    setEventDate("");
+    setDeadline("");
+    setLocation("");
+    setSelectedClubs([]);
+    setGuestsAllowed(false);
+    setGuestLimit(1);
+    setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+    setAiText("");
   };
 
   const toggleClub = (club) => setSelectedClubs(prev => prev.includes(club) ? prev.filter(c => c !== club) : [...prev, club]);
@@ -177,6 +252,41 @@ export default function AdminDashboard() {
           </button>
         </div>
 
+        {/* Existing Events Manager */}
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
+          <div className="flex justify-between items-center mb-6 border-b pb-3">
+            <h2 className="font-bold text-xl text-gray-800">Événements Existants</h2>
+            {editingEventId && (
+              <button onClick={resetForm} className="text-sm bg-blue-100 text-blue-600 px-4 py-2 rounded-lg font-bold hover:bg-blue-200 flex items-center gap-2">
+                <X className="w-4 h-4" /> Annuler l'édition
+              </button>
+            )}
+          </div>
+          
+          {isLoadingEvents ? (
+            <div className="flex items-center justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+          ) : eventsList.length === 0 ? (
+            <p className="text-gray-500 text-sm italic">Aucun événement trouvé dans la base de données.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {eventsList.map(evt => (
+                <div key={evt.id} className={`p-4 border-2 rounded-2xl ${editingEventId === evt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+                  <h3 className="font-bold text-gray-900 truncate">{evt.event_name}</h3>
+                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-1"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={() => loadEventToEdit(evt)} className="flex-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-xs font-bold hover:bg-gray-100 flex items-center justify-center gap-1">
+                      <Edit className="w-3 h-3" /> Éditer
+                    </button>
+                    <button onClick={() => handleDeleteEvent(evt.id)} className="bg-red-50 text-red-600 px-3 py-2 rounded-lg hover:bg-red-100 flex items-center justify-center">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* AI Integration */}
         <div className="bg-gradient-to-br from-indigo-900 to-blue-900 p-8 rounded-3xl shadow-lg border border-indigo-700">
           <h2 className="text-2xl font-black flex items-center gap-3 text-white mb-4">
@@ -201,7 +311,9 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           <div className="xl:col-span-2 space-y-8">
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-              <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">Informations Générales</h2>
+              <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">
+                {editingEventId ? "Édition de l'événement" : "Créer un événement"}
+              </h2>
               <input type="text" placeholder="Nom de l'événement" className="w-full border-2 border-gray-100 p-4 rounded-xl mb-5 bg-gray-50 focus:border-blue-500 outline-none font-medium" value={eventName} onChange={e => setEventName(e.target.value)} />
               <textarea placeholder="Paragraphe principal de l'invitation..." className="w-full h-40 border-2 border-gray-100 p-4 rounded-xl mb-5 bg-gray-50 focus:border-blue-500 outline-none resize-none" value={mainParagraph} onChange={e => setMainParagraph(e.target.value)} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
@@ -275,7 +387,7 @@ export default function AdminDashboard() {
 
             <button onClick={handleSaveEvent} disabled={isSaving} className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3 disabled:opacity-70">
               {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
-              {isSaving ? "Publication..." : "Publier l'Événement"}
+              {isSaving ? "Sauvegarde en cours..." : (editingEventId ? "Mettre à jour l'Événement" : "Publier l'Événement")}
             </button>
           </div>
         </div>
