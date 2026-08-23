@@ -15,11 +15,16 @@ export async function POST(req) {
     "eventDate": "String (e.g., 20 Août 2026 à 18h)",
     "location": "String (Name of place or maps link)",
     "deadline": "YYYY-MM-DDTHH:MM (Convert the deadline to an ISO datetime string)",
-    "memberPrice": Number (Price for members in DT),
-    "guestPrice": Number (Price for guests in DT),
-    "guestsAllowed": Boolean (True if guests/invités are allowed, false if 'Aucun invité' or strictly members only),
+    "guestsAllowed": Boolean (True if guests/invités are allowed, false if strictly members only),
     "guestLimit": Number (How many guests per member, default 1 if allowed but not specified),
-    "parts": ["Array of Strings (e.g., 'Cérémonie', 'Soirée')"]
+    "mainParagraph": "String (The full invitation message body, exactly as written)",
+    "parts": [
+      {
+        "name": "String (e.g., 'Cérémonie', 'Soirée', or 'Passation complète')",
+        "memberPrice": Number (Price for interactiens/members for this part in DT, 0 if free),
+        "guestPrice": Number (Price for guests/invités for this part in DT, 0 if free)
+      }
+    ]
   }
   
   Invitation Text:
