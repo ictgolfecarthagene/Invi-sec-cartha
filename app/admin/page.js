@@ -57,7 +57,8 @@ export default function AdminDashboard() {
     if (authenticated) fetchEvents();
   }, [authenticated]);
 
-  const handleLogin = () => {
+  const handleLogin = (e) => {
+    if (e) e.preventDefault(); // Prevent page reload on form submit
     if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
       setAuthenticated(true);
     } else {
@@ -107,17 +108,30 @@ export default function AdminDashboard() {
           </div>
           <h2 className="text-3xl font-black text-gray-900 mb-2">Accès Sécurisé</h2>
           <p className="text-gray-500 mb-8 font-medium">Administration ICTGC</p>
-          <input 
-            type="password" 
-            placeholder="Mot de passe..."
-            className="w-full bg-gray-50 border-2 border-gray-200 p-4 rounded-2xl mb-6 text-center text-xl font-bold focus:border-blue-500 focus:bg-white outline-none"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-          />
-          <button onClick={handleLogin} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-2xl shadow-xl active:scale-95">
-            Déverrouiller
-          </button>
+          
+          {/* Wrapped inputs in a form for password managers */}
+          <form onSubmit={handleLogin}>
+            <input 
+              type="text" 
+              name="username" 
+              autoComplete="username" 
+              value="admin" 
+              readOnly 
+              style={{ display: 'none' }} 
+            />
+            <input 
+              type="password" 
+              name="password"
+              autoComplete="current-password"
+              placeholder="Mot de passe..."
+              className="w-full bg-gray-50 border-2 border-gray-200 p-4 rounded-2xl mb-6 text-center text-xl font-bold focus:border-blue-500 focus:bg-white outline-none"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-2xl shadow-xl active:scale-95">
+              Déverrouiller
+            </button>
+          </form>
         </div>
       </div>
     );
