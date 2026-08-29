@@ -260,7 +260,7 @@ export default function AdminDashboard() {
     if (!window.confirm(`Voulez-vous vraiment envoyer une notification push pour "${evt.event_name}" ?`)) return;
     setIsNotifying(true);
     try {
-      const response = await fetch('/api/notify', {
+      const response = await fetch('/api/reminder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: "Rappel Interact", message: `Dernier rappel pour: ${evt.event_name}. Veuillez confirmer votre présence !` })
