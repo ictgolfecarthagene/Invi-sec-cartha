@@ -6,20 +6,19 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Ensure these match the keys generated in your Vercel Environment Variables
 webpush.setVapidDetails(
-  'mailto:votre_email_club@gmail.com', 
+  'mailto:votre_email_club@gmail.com', // Mettez votre vrai email
   process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
 
-// Changed to POST to accept the data sent from your admin button
+// CHANGÉ EN POST POUR CORRESPONDRE AU BOUTON DE L'ADMIN
 export async function POST(req) {
   try {
-    // Read the title and message sent by the admin dashboard
+    // 1. Lire les données envoyées par le bouton "Envoyer un rappel"
     const { title, message } = await req.json();
 
-    // 1. Fetch all subscribed admin devices
+    // 2. Récupérer tous les téléphones administrateurs enregistrés
     const { data: subscriptions, error: subError } = await supabase
         .from('admin_subscriptions')
         .select('*');
@@ -32,10 +31,11 @@ export async function POST(req) {
 
     const payload = JSON.stringify({ 
         title: title || "Rappel Interact", 
-        body: message 
+        body: message,
+        url: "/admin"
     });
 
-    // 2. Send the Push Notification to every device
+    // 3. Envoyer la notification Push à chaque téléphone
     const sendPromises = subscriptions.map(sub => {
       const pushConfig = {
         endpoint: sub.endpoint,
@@ -44,7 +44,7 @@ export async function POST(req) {
 
       return webpush.sendNotification(pushConfig, payload).catch(async (err) => {
         console.error("Push failed for an endpoint:", err);
-        // Clean up invalid subscriptions if the user revoked access
+        // Si l'utilisateur a révoqué l'accès, on supprime son téléphone de la BDD
         if (err.statusCode === 410 || err.statusCode === 404) {
           await supabase.from('admin_subscriptions').delete().eq('endpoint', sub.endpoint);
         }
