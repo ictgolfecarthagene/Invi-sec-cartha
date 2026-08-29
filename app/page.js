@@ -9,11 +9,8 @@ export default function Home() {
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  // RSVP Tracking
-  const [membersCount, setMembersCount] = useState(0);
   const [guestsCount, setGuestsCount] = useState(0);
 
-  // Form State
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedParts, setSelectedParts] = useState([]);
   const [guestName, setGuestName] = useState("");
@@ -30,10 +27,8 @@ export default function Home() {
           setEventData(events[0]);
           if (events[0].event_parts) setSelectedParts(events[0].event_parts.map(p => p.name));
 
-          // Calculate RSVPs vs Limits
           const { data: rsvps } = await supabase.from("rsvps").select("*").eq("event_id", events[0].id);
           if (rsvps) {
-            setMembersCount(rsvps.length);
             setGuestsCount(rsvps.filter(r => r.guest_name && r.guest_name.trim() !== "").length);
           }
         }
@@ -84,13 +79,8 @@ export default function Home() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="w-8 h-8 text-blue-600 animate-spin" /></div>;
   if (!eventData) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><p className="text-gray-500 font-medium">Aucun événement actif.</p></div>;
 
-  // Enforcements
   const isPastDeadline = new Date() > new Date(eventData.deadline);
-  const isMembersFull = eventData.member_limit !== null && membersCount >= eventData.member_limit;
   const isGuestsFull = eventData.total_guest_limit !== null && guestsCount >= eventData.total_guest_limit;
-  
-  // Entire form is locked if deadline passed OR member slots are full
-  const isFormLocked = isPastDeadline || isMembersFull;
 
   return (
     <main className="min-h-screen bg-slate-50 py-10 px-4 font-sans flex flex-col items-center">
@@ -120,12 +110,10 @@ export default function Home() {
             <Users className="w-5 h-5 text-green-500" /> 
             <span>
               {eventData.guests_allowed ? `Invités Autorisés` : `Membres Uniquement`}
-              {eventData.member_limit !== null && ` • ${Math.max(0, eventData.member_limit - membersCount)} places restantes`}
             </span>
           </div>
         </div>
 
-        {/* Google Maps Embed */}
         {eventData.location && (
           <div className="mt-4 rounded-xl overflow-hidden border border-gray-200 shadow-inner">
             <iframe 
@@ -151,11 +139,11 @@ export default function Home() {
             <CheckCircle className="w-10 h-10 text-green-600 mx-auto" />
             <h3 className="text-lg font-bold text-green-900">Présence confirmée !</h3>
           </div>
-        ) : isFormLocked ? (
+        ) : isPastDeadline ? (
           <div className="p-6 bg-gray-50 border border-gray-200 rounded-2xl text-center space-y-2">
             <Lock className="w-10 h-10 text-gray-400 mx-auto" />
-            <h3 className="text-lg font-bold text-gray-700">{isPastDeadline ? "Inscriptions Fermées" : "Événement Complet"}</h3>
-            <p className="text-sm text-gray-500">{isPastDeadline ? "La date limite de confirmation est dépassée." : "Toutes les places ont été réservées."}</p>
+            <h3 className="text-lg font-bold text-gray-700">Inscriptions Fermées</h3>
+            <p className="text-sm text-gray-500">La date limite de confirmation est dépassée.</p>
           </div>
         ) : (
           <form className="space-y-4" onSubmit={handleConfirm}>

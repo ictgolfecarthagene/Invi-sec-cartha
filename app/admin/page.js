@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Users } from "lucide-react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -22,17 +22,17 @@ export default function AdminDashboard() {
   const [password, setPassword] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
 
-  // Loading States
   const [isSaving, setIsSaving] = useState(false);
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [isNotifying, setIsNotifying] = useState(false);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
 
-  // Event Management State
   const [eventsList, setEventsList] = useState([]);
   const [editingEventId, setEditingEventId] = useState(null);
+  const [previewData, setPreviewData] = useState(null); 
 
-  // Form State
   const [aiText, setAiText] = useState("");
   const [eventName, setEventName] = useState("");
   const [mainParagraph, setMainParagraph] = useState("");
@@ -40,7 +40,6 @@ export default function AdminDashboard() {
   const [deadline, setDeadline] = useState("");
   const [location, setLocation] = useState("");
   const [selectedClubs, setSelectedClubs] = useState([]);
-  const [memberLimit, setMemberLimit] = useState("");
   const [guestsAllowed, setGuestsAllowed] = useState(false);
   const [totalGuestLimit, setTotalGuestLimit] = useState("");
   const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
@@ -63,6 +62,23 @@ export default function AdminDashboard() {
     else alert("Mot de passe incorrect");
   };
 
+  const syncGoogleSheets = async () => {
+    setIsSyncingSheet(true);
+    try {
+      const response = await fetch('/api/sync-members', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        alert(`✅ Synchronisation réussie ! ${data.count} membres ont été importés de Google Sheets.`);
+      } else {
+        alert("❌ Erreur de synchronisation: " + data.error);
+      }
+    } catch (error) {
+      alert("❌ Impossible de contacter le serveur de synchronisation.");
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
   const handleAIParsing = async () => {
     if (!aiText.trim()) return alert("Veuillez coller le texte de l'invitation.");
     setIsParsing(true);
@@ -81,8 +97,7 @@ export default function AdminDashboard() {
       if (data.eventDate) setEventDate(data.eventDate);
       if (data.location) setLocation(data.location);
       if (data.deadline) setDeadline(data.deadline);
-      if (data.hostClubs) setSelectedClubs(data.hostClubs);
-      if (data.memberLimit) setMemberLimit(data.memberLimit);
+      if (data.hostClubs) setSelectedClubs(Array.isArray(data.hostClubs) ? data.hostClubs : [data.hostClubs]);
       if (data.guestsAllowed !== undefined) setGuestsAllowed(data.guestsAllowed);
       if (data.parts && data.parts.length > 0) setParts(data.parts);
       
@@ -127,7 +142,6 @@ export default function AdminDashboard() {
       location: location,
       main_paragraph: mainParagraph,
       deadline: deadline,
-      member_limit: memberLimit ? Number(memberLimit) : null,
       guests_allowed: guestsAllowed,
       total_guest_limit: guestsAllowed && totalGuestLimit ? Number(totalGuestLimit) : null,
       event_parts: parts
@@ -161,8 +175,7 @@ export default function AdminDashboard() {
     setEventDate(evt.event_date || "");
     setDeadline(evt.deadline || "");
     setLocation(evt.location || "");
-    setSelectedClubs(evt.host_clubs || []);
-    setMemberLimit(evt.member_limit || "");
+    setSelectedClubs(Array.isArray(evt.host_clubs) ? evt.host_clubs : []);
     setGuestsAllowed(evt.guests_allowed || false);
     setTotalGuestLimit(evt.total_guest_limit || "");
     setParts(evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
@@ -177,11 +190,17 @@ export default function AdminDashboard() {
     setDeadline("");
     setLocation("");
     setSelectedClubs([]);
-    setMemberLimit("");
     setGuestsAllowed(false);
     setTotalGuestLimit("");
     setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
     setAiText("");
+  };
+
+  const toggleClub = (club) => {
+    setSelectedClubs(prev => {
+      const currentList = Array.isArray(prev) ? prev : [];
+      return currentList.includes(club) ? currentList.filter(c => c !== club) : [...currentList, club];
+    });
   };
 
   const updatePart = (index, field, value) => {
@@ -190,33 +209,40 @@ export default function AdminDashboard() {
     setParts(newParts);
   };
 
-  // FETCH REAL RSVPS AND INJECT INTO TEMPLATE
-  const generateAndCopy = async (evt) => {
+  const openPreview = async (evt) => {
     const { data: rsvps } = await supabase.from('rsvps').select('*').eq('event_id', evt.id);
     
     let listText = "Aucun participant pour le moment.";
-    
     if (rsvps && rsvps.length > 0) {
       listText = rsvps.map((r, i) => {
-        let str = `${i + 1}. ${r.member_name} (${r.selected_parts.join(', ')})`;
-        if (r.guest_name) str += `\n   ↳ Invité: ${r.guest_name}`;
+        let partsStr = Array.isArray(r.selected_parts) ? r.selected_parts.join(' + ') : r.selected_parts;
+        let str = `${i + 1}. Membre : ${r.member_name} (Options : ${partsStr})`;
+        if (r.guest_name) str += `\n    ↳ Invité : ${r.guest_name}`;
         return str;
-      }).join("\n");
+      }).join("\n\n");
     }
 
     let finalMessage = template.replace("[EVENT_NAME]", evt.event_name).replace("[LIST]", listText);
-    
-    try {
-      await navigator.clipboard.writeText(finalMessage);
-      alert(`✅ Liste des présences pour "${evt.event_name}" copiée dans le presse-papiers !`);
-    } catch (err) {
-      alert("❌ Erreur lors de la copie.");
-    }
+    setPreviewData({ text: finalMessage });
   };
 
   const sendReminder = async (evt) => {
-    // This will connect to your Push notification route later
-    alert(`🔔 Rappel envoyé à tous les membres pour l'événement: ${evt.event_name}`);
+    if (!window.confirm(`Voulez-vous vraiment envoyer une notification push pour "${evt.event_name}" ?`)) return;
+    setIsNotifying(true);
+    try {
+      const response = await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: "Rappel Interact", message: `Dernier rappel pour: ${evt.event_name}. Veuillez confirmer votre présence !` })
+      });
+      const data = await response.json();
+      if (data.success) alert(`✅ Notifications envoyées avec succès à ${data.sent} appareils !`);
+      else alert("❌ Erreur: " + data.error);
+    } catch (err) {
+      alert("❌ Impossible de contacter le serveur de notifications.");
+    } finally {
+      setIsNotifying(false);
+    }
   };
 
   const enableNotifications = async () => {
@@ -231,8 +257,7 @@ export default function AdminDashboard() {
         applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
       });
       const subData = JSON.parse(JSON.stringify(subscription));
-      const { error } = await supabase.from('admin_subscriptions').insert([{ endpoint: subData.endpoint, p256dh: subData.keys.p256dh, auth: subData.keys.auth }]);
-      if (error) throw error;
+      await supabase.from('admin_subscriptions').insert([{ endpoint: subData.endpoint, p256dh: subData.keys.p256dh, auth: subData.keys.auth }]);
       alert('✅ Notifications activées sur ce téléphone !');
     } catch (error) {
       alert("Erreur lors de l'activation des notifications.");
@@ -242,17 +267,44 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans">
+    <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans relative">
+      
+      {previewData && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative max-h-[90vh] flex flex-col">
+            <button onClick={() => setPreviewData(null)} className="absolute top-6 right-6 text-gray-400 hover:text-gray-900 transition-colors"><X className="w-6 h-6" /></button>
+            <h2 className="text-2xl font-black text-gray-900 mb-6 flex items-center gap-2"><Eye className="w-6 h-6 text-blue-600"/> Aperçu avant envoi</h2>
+            
+            <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 whitespace-pre-wrap overflow-y-auto flex-1 text-sm text-gray-700 font-medium font-mono leading-relaxed">
+              {previewData.text}
+            </div>
+            
+            <div className="mt-6">
+              <button 
+                onClick={() => { navigator.clipboard.writeText(previewData.text); alert("Copié !"); setPreviewData(null); }} 
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 transition-transform active:scale-95"
+              >
+                <Copy className="w-5 h-5"/> Copier et Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto space-y-8">
         
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-gray-200">
           <h1 className="text-3xl font-black flex items-center gap-3 text-gray-900"><Settings className="text-blue-600 w-8 h-8" /> Administration</h1>
-          <button onClick={enableNotifications} disabled={isSubscribing} className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
-            {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} Activer les Alertes
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button onClick={syncGoogleSheets} disabled={isSyncingSheet} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
+              {isSyncingSheet ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCcw className="w-5 h-5" />} Sync Sheets
+            </button>
+            <button onClick={enableNotifications} disabled={isSubscribing} className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
+              {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} Alertes
+            </button>
+          </div>
         </div>
 
-        {/* Custom Template Editor */}
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
           <h2 className="font-bold text-xl mb-4 text-gray-800">Template de Message (Pour la Secrétaire)</h2>
           <p className="text-xs text-gray-500 mb-4">Utilisez [EVENT_NAME] et [LIST] pour injecter les données automatiquement.</p>
@@ -263,7 +315,6 @@ export default function AdminDashboard() {
           />
         </div>
 
-        {/* Existing Events Manager */}
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
           <div className="flex justify-between items-center mb-6 border-b pb-3">
             <h2 className="font-bold text-xl text-gray-800">Événements Existants</h2>
@@ -282,11 +333,11 @@ export default function AdminDashboard() {
                   <p className="text-xs text-gray-500 flex items-center gap-1 mb-4"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
                   
                   <div className="space-y-2">
-                    <button onClick={() => generateAndCopy(evt)} className="w-full bg-blue-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
-                      <Copy className="w-4 h-4" /> Copier la liste des participants
+                    <button onClick={() => openPreview(evt)} className="w-full bg-blue-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
+                      <Eye className="w-4 h-4" /> Voir & Copier la liste
                     </button>
-                    <button onClick={() => sendReminder(evt)} className="w-full bg-yellow-500 text-yellow-950 py-2 rounded-lg text-xs font-bold hover:bg-yellow-600 flex items-center justify-center gap-2">
-                      <BellRing className="w-4 h-4" /> Envoyer un Rappel
+                    <button onClick={() => sendReminder(evt)} disabled={isNotifying} className="w-full bg-yellow-500 text-yellow-950 py-2 rounded-lg text-xs font-bold hover:bg-yellow-600 flex items-center justify-center gap-2 disabled:opacity-70">
+                      {isNotifying ? <Loader2 className="w-4 h-4 animate-spin"/> : <BellRing className="w-4 h-4" />} Envoyer un Rappel
                     </button>
                     <div className="flex gap-2 pt-2">
                       <button onClick={() => loadEventToEdit(evt)} className="flex-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-xs font-bold hover:bg-gray-100 flex items-center justify-center gap-1"><Edit className="w-3 h-3" /> Éditer</button>
@@ -309,9 +360,9 @@ export default function AdminDashboard() {
                 <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Date</label><input type="text" placeholder="Ex: 20 Août à 18h" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={eventDate} onChange={e => setEventDate(e.target.value)} /></div>
                 <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Lieu</label><input type="text" placeholder="Ex: Hammamet Nord" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={location} onChange={e => setLocation(e.target.value)} /></div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-                <div><label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label><input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 mt-1" value={deadline} onChange={e => setDeadline(e.target.value)} required /></div>
-                <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Limite totale de membres (Optionnel)</label><input type="number" placeholder="Ex: 50" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={memberLimit} onChange={e => setMemberLimit(e.target.value)} /></div>
+              <div>
+                <label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label>
+                <input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 mt-1" value={deadline} onChange={e => setDeadline(e.target.value)} required />
               </div>
             </div>
 
