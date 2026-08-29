@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw, Link as LinkIcon } from "lucide-react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw, Link as LinkIcon, Users } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -31,7 +31,10 @@ export default function AdminDashboard() {
 
   const [eventsList, setEventsList] = useState([]);
   const [editingEventId, setEditingEventId] = useState(null);
-  const [previewData, setPreviewData] = useState(null); 
+  
+  // Waitlist & Deletion States
+  const [currentPreviewEvent, setCurrentPreviewEvent] = useState(null);
+  const [previewRsvps, setPreviewRsvps] = useState([]);
 
   const [aiText, setAiText] = useState("");
   const [eventName, setEventName] = useState("");
@@ -240,11 +243,40 @@ export default function AdminDashboard() {
   };
 
   const openPreview = async (evt) => {
-    const { data: rsvps } = await supabase.from('rsvps').select('*').eq('event_id', evt.id);
+    const { data: rsvps } = await supabase.from('rsvps').select('*').eq('event_id', evt.id).order('created_at', { ascending: true });
+    setCurrentPreviewEvent(evt);
+    setPreviewRsvps(rsvps || []);
+  };
+
+  const handleDeleteRSVP = async (rsvp) => {
+    if (!window.confirm(`Voulez-vous vraiment annuler la réservation de ${rsvp.member_name} ?`)) return;
     
+    await supabase.from('rsvps').delete().eq('id', rsvp.id);
+    
+    // Promote the first waitlisted person if a confirmed spot opens up
+    if (!rsvp.is_waitlist) {
+      const { data: waitlisted } = await supabase
+        .from('rsvps')
+        .select('*')
+        .eq('event_id', rsvp.event_id)
+        .eq('is_waitlist', true)
+        .order('created_at', { ascending: true }) 
+        .limit(1);
+
+      if (waitlisted && waitlisted.length > 0) {
+        await supabase.from('rsvps').update({ is_waitlist: false }).eq('id', waitlisted[0].id);
+        alert(`✅ Une place s'est libérée ! ${waitlisted[0].member_name} a été automatiquement promu(e) aux confirmations.`);
+      }
+    }
+    openPreview(currentPreviewEvent);
+  };
+
+  const copyToClipboard = () => {
     let listText = "Aucun participant pour le moment.";
-    if (rsvps && rsvps.length > 0) {
-      listText = rsvps.map((r, i) => {
+    const confirmed = previewRsvps.filter(r => !r.is_waitlist);
+    
+    if (confirmed.length > 0) {
+      listText = confirmed.map((r, i) => {
         let partsStr = Array.isArray(r.selected_parts) ? r.selected_parts.join(' + ') : r.selected_parts;
         let str = `${i + 1}. Membre : ${r.member_name} (Options : ${partsStr})`;
         if (r.guest_name) str += `\n    ↳ Invité : ${r.guest_name}`;
@@ -252,8 +284,9 @@ export default function AdminDashboard() {
       }).join("\n\n");
     }
 
-    let finalMessage = template.replace("[EVENT_NAME]", evt.event_name).replace("[LIST]", listText);
-    setPreviewData({ text: finalMessage });
+    let finalMessage = template.replace("[EVENT_NAME]", currentPreviewEvent.event_name).replace("[LIST]", listText);
+    navigator.clipboard.writeText(finalMessage);
+    alert("✅ Liste des CONFIRMÉS copiée dans le presse-papiers !");
   };
 
   const sendReminder = async (evt) => {
@@ -266,7 +299,6 @@ export default function AdminDashboard() {
         body: JSON.stringify({ title: "Rappel Interact", message: `Dernier rappel pour: ${evt.event_name}. Veuillez confirmer votre présence !` })
       });
       
-      // CAPTURE DE LA VRAIE ERREUR
       const contentType = response.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         const text = await response.text();
@@ -308,22 +340,44 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans relative">
       
-      {previewData && (
+      {/* Waitlist and Deletion Modal */}
+      {currentPreviewEvent && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative max-h-[90vh] flex flex-col">
-            <button onClick={() => setPreviewData(null)} className="absolute top-6 right-6 text-gray-400 hover:text-gray-900 transition-colors"><X className="w-6 h-6" /></button>
-            <h2 className="text-2xl font-black text-gray-900 mb-6 flex items-center gap-2"><Eye className="w-6 h-6 text-blue-600"/> Aperçu avant envoi</h2>
+            <button onClick={() => setCurrentPreviewEvent(null)} className="absolute top-6 right-6 text-gray-400 hover:text-gray-900"><X className="w-6 h-6" /></button>
+            <h2 className="text-2xl font-black text-gray-900 mb-6 flex items-center gap-2"><Users className="w-6 h-6 text-blue-600"/> Gestion des Présences</h2>
             
-            <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 whitespace-pre-wrap overflow-y-auto flex-1 text-sm text-gray-700 font-medium font-mono leading-relaxed">
-              {previewData.text}
+            <div className="overflow-y-auto flex-1 pr-2 space-y-6">
+               <div>
+                 <h3 className="font-bold text-lg text-green-700 border-b pb-2 mb-3">✅ Confirmés ({previewRsvps.filter(r => !r.is_waitlist).length})</h3>
+                 {previewRsvps.filter(r => !r.is_waitlist).length === 0 ? <p className="text-sm text-gray-500 italic">Aucun membre confirmé pour le moment.</p> : previewRsvps.filter(r => !r.is_waitlist).map(r => (
+                    <div key={r.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl mb-2 border border-gray-100">
+                       <div>
+                         <p className="font-bold text-sm text-gray-800">{r.member_name}</p>
+                         <p className="text-xs text-gray-500">{Array.isArray(r.selected_parts) ? r.selected_parts.join(', ') : r.selected_parts} {r.guest_name && ` | Invité: ${r.guest_name}`}</p>
+                       </div>
+                       <button onClick={() => handleDeleteRSVP(r)} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                 ))}
+               </div>
+
+               <div>
+                 <h3 className="font-bold text-lg text-orange-600 border-b pb-2 mb-3">⏳ Liste d'attente ({previewRsvps.filter(r => r.is_waitlist).length})</h3>
+                 {previewRsvps.filter(r => r.is_waitlist).length === 0 ? <p className="text-sm text-gray-500 italic">Aucun membre en attente.</p> : previewRsvps.filter(r => r.is_waitlist).map(r => (
+                    <div key={r.id} className="flex justify-between items-center bg-orange-50 p-3 rounded-xl mb-2 border border-orange-100">
+                       <div>
+                         <p className="font-bold text-sm text-gray-800">{r.member_name}</p>
+                         <p className="text-xs text-gray-500">{Array.isArray(r.selected_parts) ? r.selected_parts.join(', ') : r.selected_parts}</p>
+                       </div>
+                       <button onClick={() => handleDeleteRSVP(r)} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                 ))}
+               </div>
             </div>
-            
-            <div className="mt-6">
-              <button 
-                onClick={() => { navigator.clipboard.writeText(previewData.text); alert("Copié !"); setPreviewData(null); }} 
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 transition-transform active:scale-95"
-              >
-                <Copy className="w-5 h-5"/> Copier et Fermer
+
+            <div className="mt-6 pt-4 border-t">
+              <button onClick={copyToClipboard} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 transition-transform active:scale-95">
+                <Copy className="w-5 h-5"/> Copier la liste confirmée
               </button>
             </div>
           </div>
@@ -337,6 +391,9 @@ export default function AdminDashboard() {
           <div className="flex flex-col sm:flex-row gap-3">
             <button onClick={syncGoogleSheets} disabled={isSyncingSheet} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
               {isSyncingSheet ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCcw className="w-5 h-5" />} Sync Sheets
+            </button>
+            <button onClick={enableNotifications} disabled={isSubscribing} className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
+              {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} Alertes
             </button>
           </div>
         </div>
@@ -373,7 +430,7 @@ export default function AdminDashboard() {
                       <LinkIcon className="w-4 h-4" /> Copier le Lien Direct
                     </button>
                     <button onClick={() => openPreview(evt)} className="w-full bg-blue-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
-                      <Eye className="w-4 h-4" /> Voir & Copier la liste
+                      <Eye className="w-4 h-4" /> Voir & Gérer la liste
                     </button>
                     <button onClick={() => sendReminder(evt)} disabled={isNotifying} className="w-full bg-yellow-500 text-yellow-950 py-2 rounded-lg text-xs font-bold hover:bg-yellow-600 flex items-center justify-center gap-2 disabled:opacity-70">
                       {isNotifying ? <Loader2 className="w-4 h-4 animate-spin"/> : <BellRing className="w-4 h-4" />} Envoyer un Rappel

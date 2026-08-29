@@ -12,13 +12,10 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-// CHANGÉ EN POST POUR CORRESPONDRE AU BOUTON DE L'ADMIN
 export async function POST(req) {
   try {
-    // 1. Lire les données envoyées par le bouton "Envoyer un rappel"
     const { title, message } = await req.json();
 
-    // 2. Récupérer tous les téléphones administrateurs enregistrés
     const { data: subscriptions, error: subError } = await supabase
         .from('admin_subscriptions')
         .select('*');
@@ -35,7 +32,6 @@ export async function POST(req) {
         url: "/admin"
     });
 
-    // 3. Envoyer la notification Push à chaque téléphone
     const sendPromises = subscriptions.map(sub => {
       const pushConfig = {
         endpoint: sub.endpoint,
@@ -44,7 +40,6 @@ export async function POST(req) {
 
       return webpush.sendNotification(pushConfig, payload).catch(async (err) => {
         console.error("Push failed for an endpoint:", err);
-        // Si l'utilisateur a révoqué l'accès, on supprime son téléphone de la BDD
         if (err.statusCode === 410 || err.statusCode === 404) {
           await supabase.from('admin_subscriptions').delete().eq('endpoint', sub.endpoint);
         }

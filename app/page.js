@@ -7,12 +7,10 @@ import { Calendar, MapPin, Users, ChevronDown, ChevronUp, Loader2, CheckCircle, 
 function EventCard({ eventData, members }) {
   const [expandedEvent, setExpandedEvent] = useState(null);
   
-  // RSVP Tracking
   const [totalMembersCount, setTotalMembersCount] = useState(0);
   const [totalGuestsCount, setTotalGuestsCount] = useState(0);
   const [partCounts, setPartCounts] = useState({}); 
 
-  // Form State
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedParts, setSelectedParts] = useState([]);
   const [guestName, setGuestName] = useState("");
@@ -23,11 +21,13 @@ function EventCard({ eventData, members }) {
     async function loadRSVPs() {
       const { data: rsvps } = await supabase.from("rsvps").select("*").eq("event_id", eventData.id);
       if (rsvps) {
-        setTotalMembersCount(rsvps.length);
-        setTotalGuestsCount(rsvps.filter(r => r.guest_name && r.guest_name.trim() !== "").length);
+        // Only count confirmed members for capacity limits
+        const confirmedRsvps = rsvps.filter(r => !r.is_waitlist);
+        setTotalMembersCount(confirmedRsvps.length);
+        setTotalGuestsCount(confirmedRsvps.filter(r => r.guest_name && r.guest_name.trim() !== "").length);
 
         const counts = {};
-        rsvps.forEach(r => {
+        confirmedRsvps.forEach(r => {
            if (Array.isArray(r.selected_parts)) {
              r.selected_parts.forEach(p => {
                 if (!counts[p]) counts[p] = { members: 0, guests: 0 };
@@ -58,6 +58,9 @@ function EventCard({ eventData, members }) {
     return total;
   };
 
+  const isTotalMembersFull = eventData.total_member_limit !== null && totalMembersCount >= eventData.total_member_limit;
+  const isTotalGuestsFull = eventData.total_guest_limit !== null && totalGuestsCount >= eventData.total_guest_limit;
+
   const handleConfirm = async (e) => {
     e.preventDefault();
     if (!selectedMember) return alert("Veuillez entrer et sélectionner votre nom dans la liste.");
@@ -68,12 +71,16 @@ function EventCard({ eventData, members }) {
     if (selectedParts.length === 0) return alert("Veuillez sélectionner au moins une partie.");
 
     setIsSubmitting(true);
+    // Add to waitlist automatically if full
+    const isWaitlist = isTotalMembersFull;
+
     const { error } = await supabase.from("rsvps").insert([{
       event_id: eventData.id,
       member_name: selectedMember,
       selected_parts: selectedParts,
       guest_name: guestName.trim() || null,
-      total_price: calculateTotal()
+      total_price: calculateTotal(),
+      is_waitlist: isWaitlist
     }]);
     setIsSubmitting(false);
 
@@ -85,11 +92,9 @@ function EventCard({ eventData, members }) {
   const deadlineTime = new Date(eventData.deadline).getTime();
   const isPastDeadline = nowTime > deadlineTime;
 
-  const isTotalMembersFull = eventData.total_member_limit !== null && totalMembersCount >= eventData.total_member_limit;
-  const isTotalGuestsFull = eventData.total_guest_limit !== null && totalGuestsCount >= eventData.total_guest_limit;
-  const isFormLocked = isPastDeadline || isTotalMembersFull;
+  // Form is ONLY locked if deadline is passed. If member limit is full, they can join waitlist.
+  const isFormLocked = isPastDeadline;
 
-  // COMPACT CARD FOR EXPIRED EVENTS
   if (isPastDeadline) {
     return (
       <div className="w-full bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 opacity-80">
@@ -104,13 +109,15 @@ function EventCard({ eventData, members }) {
     );
   }
 
-  // FULL ACTIVE CARD
   return (
     <div className="w-full bg-white p-8 rounded-3xl shadow-sm border border-blue-100 space-y-6">
       <div className="flex justify-between items-start mb-4">
         <span className="text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide bg-red-50 text-red-600">
           Deadline: {eventData.deadline ? new Date(eventData.deadline).toLocaleDateString("fr-FR", { day: 'numeric', month: 'short', hour: '2-digit', minute:'2-digit' }) : 'Bientôt'}
         </span>
+        {isTotalMembersFull && !isPastDeadline && (
+          <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full uppercase">Liste d'attente</span>
+        )}
       </div>
       
       <h2 className="text-3xl font-black text-gray-900 leading-tight">{eventData.event_name}</h2>
@@ -127,7 +134,6 @@ function EventCard({ eventData, members }) {
         </div>
       </div>
 
-      {/* Google Maps Embed & Link */}
       {eventData.location && (
         <div className="mt-4 space-y-2">
           <div className="flex justify-end">
@@ -154,7 +160,6 @@ function EventCard({ eventData, members }) {
         </div>
       )}
 
-      {/* Program & Tariffs */}
       {eventData.event_parts && eventData.event_parts.length > 0 && (
         <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
           <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Info className="w-4 h-4"/> Programme & Tarifs</h4>
@@ -166,7 +171,6 @@ function EventCard({ eventData, members }) {
         </div>
       )}
 
-      {/* Expandable Invitation Text */}
       {eventData.main_paragraph && (
         <div className="border border-gray-200 rounded-2xl overflow-hidden mt-4">
           <button onClick={() => setExpandedEvent(expandedEvent === 1 ? null : 1)} className="w-full p-4 bg-gray-50 flex items-center justify-between text-sm font-bold text-gray-700 hover:bg-gray-100 transition-colors">
@@ -181,18 +185,17 @@ function EventCard({ eventData, members }) {
       {submitted ? (
         <div className="p-6 bg-green-50 border border-green-200 rounded-2xl text-center space-y-2">
           <CheckCircle className="w-10 h-10 text-green-600 mx-auto" />
-          <h3 className="text-lg font-bold text-green-900">Présence confirmée !</h3>
+          <h3 className="text-lg font-bold text-green-900">{isTotalMembersFull ? "Ajouté à la liste d'attente !" : "Présence confirmée !"}</h3>
         </div>
       ) : isFormLocked ? (
         <div className="p-6 bg-gray-50 border border-gray-200 rounded-2xl text-center space-y-2">
           <Lock className="w-10 h-10 text-gray-400 mx-auto" />
-          <h3 className="text-lg font-bold text-gray-700">Événement Complet</h3>
-          <p className="text-sm text-gray-500">Toutes les places globales ont été réservées.</p>
+          <h3 className="text-lg font-bold text-gray-700">Inscriptions Fermées</h3>
+          <p className="text-sm text-gray-500">La date limite de confirmation est dépassée.</p>
         </div>
       ) : (
         <form className="space-y-4" onSubmit={handleConfirm}>
           
-          {/* Datalist Searchable Input */}
           <div className="relative">
             <input 
               list={`members-list-${eventData.id}`}
@@ -234,8 +237,8 @@ function EventCard({ eventData, members }) {
             )
           )}
           
-          <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-black text-lg px-4 py-4 rounded-xl w-full shadow-lg transition-all flex justify-center items-center">
-            {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : `Confirmer (${calculateTotal()} DT)`}
+          <button type="submit" disabled={isSubmitting} className={`${isTotalMembersFull ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'} text-white font-black text-lg px-4 py-4 rounded-xl w-full shadow-lg transition-all flex justify-center items-center`}>
+            {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : (isTotalMembersFull ? `Rejoindre la liste d'attente (${calculateTotal()} DT)` : `Confirmer (${calculateTotal()} DT)`)}
           </button>
         </form>
       )}
