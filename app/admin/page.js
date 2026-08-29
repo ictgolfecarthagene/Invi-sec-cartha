@@ -40,9 +40,12 @@ export default function AdminDashboard() {
   const [deadline, setDeadline] = useState("");
   const [location, setLocation] = useState("");
   const [selectedClubs, setSelectedClubs] = useState([]);
+  const [totalMemberLimit, setTotalMemberLimit] = useState("");
   const [guestsAllowed, setGuestsAllowed] = useState(false);
   const [totalGuestLimit, setTotalGuestLimit] = useState("");
-  const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+  
+  // NOUVEAU: Ajout des limites par parties
+  const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0, memberLimit: "", guestLimit: "" }]);
   const [template, setTemplate] = useState("Aslemaa ,\nVoici la liste des participants pour [EVENT_NAME]\n\n[LIST]\n\nBonne chance 🫶");
 
   const fetchEvents = async () => {
@@ -66,11 +69,13 @@ export default function AdminDashboard() {
     setIsSyncingSheet(true);
     try {
       const response = await fetch('/api/sync-members', { method: 'POST' });
-      const data = await response.json();
-      if (data.success) {
-        alert(`✅ Synchronisation réussie ! ${data.count} membres ont été importés de Google Sheets.`);
-      } else {
-        alert("❌ Erreur de synchronisation: " + data.error);
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        if (data.success) alert(`✅ Synchronisation réussie ! ${data.count} membres ont été importés.`);
+        else alert("❌ Erreur de synchronisation: " + data.error);
+      } catch(e) {
+        alert("❌ Erreur de l'API. Avez-vous créé le fichier /api/sync-members/route.js ? Détails: " + text.substring(0,100));
       }
     } catch (error) {
       alert("❌ Impossible de contacter le serveur de synchronisation.");
@@ -99,7 +104,12 @@ export default function AdminDashboard() {
       if (data.deadline) setDeadline(data.deadline);
       if (data.hostClubs) setSelectedClubs(Array.isArray(data.hostClubs) ? data.hostClubs : [data.hostClubs]);
       if (data.guestsAllowed !== undefined) setGuestsAllowed(data.guestsAllowed);
-      if (data.parts && data.parts.length > 0) setParts(data.parts);
+      
+      // Adaptation des parties de l'IA pour inclure les limites vides
+      if (data.parts && data.parts.length > 0) {
+        const aiParts = data.parts.map(p => ({ ...p, memberLimit: "", guestLimit: "" }));
+        setParts(aiParts);
+      }
       
       alert("✅ Données extraites avec succès ! Veuillez vérifier les champs.");
     } catch (error) {
@@ -135,6 +145,13 @@ export default function AdminDashboard() {
     if (!eventName || !deadline) return alert("Le nom de l'événement et la date limite sont requis.");
     setIsSaving(true);
     
+    // Nettoyage des parties pour convertir les strings vides en null
+    const cleanParts = parts.map(p => ({
+      ...p,
+      memberLimit: p.memberLimit ? Number(p.memberLimit) : null,
+      guestLimit: p.guestLimit ? Number(p.guestLimit) : null
+    }));
+
     const payload = {
       event_name: eventName,
       host_clubs: selectedClubs,
@@ -142,9 +159,10 @@ export default function AdminDashboard() {
       location: location,
       main_paragraph: mainParagraph,
       deadline: deadline,
+      total_member_limit: totalMemberLimit ? Number(totalMemberLimit) : null,
       guests_allowed: guestsAllowed,
       total_guest_limit: guestsAllowed && totalGuestLimit ? Number(totalGuestLimit) : null,
-      event_parts: parts
+      event_parts: cleanParts
     };
 
     let error;
@@ -176,9 +194,17 @@ export default function AdminDashboard() {
     setDeadline(evt.deadline || "");
     setLocation(evt.location || "");
     setSelectedClubs(Array.isArray(evt.host_clubs) ? evt.host_clubs : []);
+    setTotalMemberLimit(evt.total_member_limit || "");
     setGuestsAllowed(evt.guests_allowed || false);
     setTotalGuestLimit(evt.total_guest_limit || "");
-    setParts(evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+    
+    const loadedParts = evt.event_parts || [{ name: "Programme", memberPrice: 0, guestPrice: 0 }];
+    const cleanParts = loadedParts.map(p => ({
+        ...p,
+        memberLimit: p.memberLimit || "",
+        guestLimit: p.guestLimit || ""
+    }));
+    setParts(cleanParts);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -190,9 +216,10 @@ export default function AdminDashboard() {
     setDeadline("");
     setLocation("");
     setSelectedClubs([]);
+    setTotalMemberLimit("");
     setGuestsAllowed(false);
     setTotalGuestLimit("");
-    setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0 }]);
+    setParts([{ name: "Programme", memberPrice: 0, guestPrice: 0, memberLimit: "", guestLimit: "" }]);
     setAiText("");
   };
 
@@ -205,7 +232,7 @@ export default function AdminDashboard() {
 
   const updatePart = (index, field, value) => {
     const newParts = [...parts];
-    newParts[index][field] = field === 'name' ? value : Number(value);
+    newParts[index][field] = (field === 'name' || field === 'memberLimit' || field === 'guestLimit') ? value : Number(value);
     setParts(newParts);
   };
 
@@ -245,27 +272,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const enableNotifications = async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return alert("Push non supporté.");
-    setIsSubscribing(true);
-    try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      const permission = await window.Notification.requestPermission();
-      if (permission !== 'granted') throw new Error('Permission refusée');
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
-      });
-      const subData = JSON.parse(JSON.stringify(subscription));
-      await supabase.from('admin_subscriptions').insert([{ endpoint: subData.endpoint, p256dh: subData.keys.p256dh, auth: subData.keys.auth }]);
-      alert('✅ Notifications activées sur ce téléphone !');
-    } catch (error) {
-      alert("Erreur lors de l'activation des notifications.");
-    } finally {
-      setIsSubscribing(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans relative">
       
@@ -299,20 +305,7 @@ export default function AdminDashboard() {
             <button onClick={syncGoogleSheets} disabled={isSyncingSheet} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
               {isSyncingSheet ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCcw className="w-5 h-5" />} Sync Sheets
             </button>
-            <button onClick={enableNotifications} disabled={isSubscribing} className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-md active:scale-95 disabled:opacity-70">
-              {isSubscribing ? <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" /> : <BellRing className="w-5 h-5 text-yellow-400" />} Alertes
-            </button>
           </div>
-        </div>
-
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-          <h2 className="font-bold text-xl mb-4 text-gray-800">Template de Message (Pour la Secrétaire)</h2>
-          <p className="text-xs text-gray-500 mb-4">Utilisez [EVENT_NAME] et [LIST] pour injecter les données automatiquement.</p>
-          <textarea 
-            value={template} 
-            onChange={(e) => setTemplate(e.target.value)} 
-            className="w-full h-32 bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm font-medium focus:outline-none focus:border-blue-500 resize-none"
-          />
         </div>
 
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
@@ -360,48 +353,12 @@ export default function AdminDashboard() {
                 <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Date</label><input type="text" placeholder="Ex: 20 Août à 18h" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={eventDate} onChange={e => setEventDate(e.target.value)} /></div>
                 <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Lieu</label><input type="text" placeholder="Ex: Hammamet Nord" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1" value={location} onChange={e => setLocation(e.target.value)} /></div>
               </div>
-              <div>
-                <label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label>
-                <input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 mt-1" value={deadline} onChange={e => setDeadline(e.target.value)} required />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+                <div><label className="text-xs font-bold text-red-500 uppercase ml-1">Deadline d'envoi</label><input type="datetime-local" className="w-full border-2 border-red-100 p-4 rounded-xl bg-red-50 mt-1 text-red-900 font-bold" value={deadline} onChange={e => setDeadline(e.target.value)} required /></div>
+                <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Limite Globale (Membres)</label><input type="number" placeholder="Ex: 50 (Vide si illimité)" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1 font-bold" value={totalMemberLimit} onChange={e => setTotalMemberLimit(e.target.value)} /></div>
               </div>
             </div>
-
-            <div className="bg-gradient-to-br from-indigo-900 to-blue-900 p-8 rounded-3xl shadow-lg border border-indigo-700">
-              <h2 className="text-2xl font-black flex items-center gap-3 text-white mb-4"><Sparkles className="text-yellow-400 w-6 h-6" /> Assistant IA</h2>
-              <textarea value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Collez l'invitation ici..." className="w-full h-32 bg-white/10 border-2 border-indigo-400/50 p-4 rounded-xl mb-6 text-white placeholder-indigo-300 focus:outline-none focus:border-yellow-400 resize-none" />
-              <button onClick={handleAIParsing} disabled={isParsing} className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-black text-lg py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-70 flex justify-center items-center gap-2">
-                {isParsing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} Auto-remplir avec l'IA
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-8">
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-              <div className="flex justify-between items-center mb-6 border-b pb-3"><h2 className="font-bold text-xl text-gray-800">Programme & Prix</h2><button onClick={() => setParts([...parts, { name: "Nouveau", memberPrice: 0, guestPrice: 0 }])} className="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-200"><Plus className="w-5 h-5"/></button></div>
-              <div className="space-y-6">
-                {parts.map((part, index) => (
-                  <div key={index} className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
-                    <div className="flex gap-2">
-                      <input type="text" placeholder="Nom (ex: Soirée)" value={part.name} onChange={(e) => updatePart(index, 'name', e.target.value)} className="flex-1 border border-gray-300 p-2 rounded-lg text-sm font-bold" />
-                      <button onClick={() => setParts(parts.filter((_, i) => i !== index))} className="bg-red-50 text-red-500 p-2 rounded-lg"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                    <div className="flex gap-2">
-                      <div className="flex-1"><label className="text-[10px] uppercase font-bold text-gray-500">Interactien</label><input type="number" value={part.memberPrice} onChange={(e) => updatePart(index, 'memberPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
-                      <div className="flex-1"><label className="text-[10px] uppercase font-bold text-gray-500">Invité</label><input type="number" value={part.guestPrice} onChange={(e) => updatePart(index, 'guestPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <hr className="my-6 border-gray-200" />
-              <div className="flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl bg-gray-50 mb-4">
-                <span className="font-bold text-gray-700">Autoriser les invités ?</span>
-                <input type="checkbox" className="w-6 h-6 rounded text-blue-600" checked={guestsAllowed} onChange={e => setGuestsAllowed(e.target.checked)} />
-              </div>
-              {guestsAllowed && (
-                <div><label className="text-xs font-bold text-gray-500 uppercase">Limite totale d'invités (L'événement)</label><input type="number" placeholder="Ex: 20 (vide si illimité)" className="w-full border-2 border-gray-100 p-3 rounded-xl bg-gray-50 mt-1 font-bold" value={totalGuestLimit} onChange={e => setTotalGuestLimit(e.target.value)} /></div>
-              )}
-            </div>
-
+            
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
               <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">Clubs Organisateurs</h2>
               <div className="h-64 overflow-y-auto border-2 border-gray-100 rounded-xl p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 custom-scrollbar">
@@ -412,6 +369,41 @@ export default function AdminDashboard() {
                   </label>
                 ))}
               </div>
+            </div>
+
+          </div>
+
+          <div className="space-y-8">
+            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
+              <div className="flex justify-between items-center mb-6 border-b pb-3"><h2 className="font-bold text-xl text-gray-800">Programme & Limites</h2><button onClick={() => setParts([...parts, { name: "Nouveau", memberPrice: 0, guestPrice: 0, memberLimit: "", guestLimit: "" }])} className="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-200"><Plus className="w-5 h-5"/></button></div>
+              <div className="space-y-6">
+                {parts.map((part, index) => (
+                  <div key={index} className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3 relative">
+                    <button onClick={() => setParts(parts.filter((_, i) => i !== index))} className="absolute top-4 right-4 bg-red-50 text-red-500 p-2 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                    
+                    <input type="text" placeholder="Nom (ex: Soirée)" value={part.name} onChange={(e) => updatePart(index, 'name', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-bold pr-12" />
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div><label className="text-[10px] uppercase font-bold text-gray-500">Prix Membre (DT)</label><input type="number" value={part.memberPrice} onChange={(e) => updatePart(index, 'memberPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
+                      <div><label className="text-[10px] uppercase font-bold text-gray-500">Prix Invité (DT)</label><input type="number" value={part.guestPrice} onChange={(e) => updatePart(index, 'guestPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
+                    </div>
+                    
+                    {/* NOUVEAU: Limites spécifiques à cette partie */}
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-200">
+                      <div><label className="text-[10px] uppercase font-bold text-blue-600">Max Membres</label><input type="number" placeholder="Illimité" value={part.memberLimit} onChange={(e) => updatePart(index, 'memberLimit', e.target.value)} className="w-full border border-blue-200 bg-blue-50 p-2 rounded-lg text-sm font-semibold" /></div>
+                      <div><label className="text-[10px] uppercase font-bold text-orange-600">Max Invités</label><input type="number" placeholder="Illimité" value={part.guestLimit} onChange={(e) => updatePart(index, 'guestLimit', e.target.value)} className="w-full border border-orange-200 bg-orange-50 p-2 rounded-lg text-sm font-semibold" /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <hr className="my-6 border-gray-200" />
+              <div className="flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl bg-gray-50 mb-4">
+                <span className="font-bold text-gray-700">Autoriser les invités ?</span>
+                <input type="checkbox" className="w-6 h-6 rounded text-blue-600" checked={guestsAllowed} onChange={e => setGuestsAllowed(e.target.checked)} />
+              </div>
+              {guestsAllowed && (
+                <div><label className="text-xs font-bold text-gray-500 uppercase">Limite Globale (Invités)</label><input type="number" placeholder="Ex: 20 (vide si illimité)" className="w-full border-2 border-gray-100 p-3 rounded-xl bg-gray-50 mt-1 font-bold" value={totalGuestLimit} onChange={e => setTotalGuestLimit(e.target.value)} /></div>
+              )}
             </div>
 
             <button onClick={handleSaveEvent} disabled={isSaving} className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3">

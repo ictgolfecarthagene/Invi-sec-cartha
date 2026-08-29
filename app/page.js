@@ -9,8 +9,12 @@ export default function Home() {
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  const [guestsCount, setGuestsCount] = useState(0);
+  // RSVP Tracking
+  const [totalMembersCount, setTotalMembersCount] = useState(0);
+  const [totalGuestsCount, setTotalGuestsCount] = useState(0);
+  const [partCounts, setPartCounts] = useState({}); // ex: { 'Soirée': { members: 5, guests: 2 } }
 
+  // Form State
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedParts, setSelectedParts] = useState([]);
   const [guestName, setGuestName] = useState("");
@@ -24,12 +28,28 @@ export default function Home() {
         const { data: events } = await supabase.from("manual_events").select("*").order("created_at", { ascending: false }).limit(1);
 
         if (events && events.length > 0) {
-          setEventData(events[0]);
-          if (events[0].event_parts) setSelectedParts(events[0].event_parts.map(p => p.name));
+          const currentEvent = events[0];
+          setEventData(currentEvent);
 
-          const { data: rsvps } = await supabase.from("rsvps").select("*").eq("event_id", events[0].id);
+          // Fetch real RSVPs
+          const { data: rsvps } = await supabase.from("rsvps").select("*").eq("event_id", currentEvent.id);
+          
           if (rsvps) {
-            setGuestsCount(rsvps.filter(r => r.guest_name && r.guest_name.trim() !== "").length);
+            setTotalMembersCount(rsvps.length);
+            setTotalGuestsCount(rsvps.filter(r => r.guest_name && r.guest_name.trim() !== "").length);
+
+            // Calculer les présences pour CHAQUE partie spécifique
+            const counts = {};
+            rsvps.forEach(r => {
+               if(Array.isArray(r.selected_parts)) {
+                 r.selected_parts.forEach(p => {
+                    if(!counts[p]) counts[p] = { members: 0, guests: 0 };
+                    counts[p].members += 1;
+                    if(r.guest_name) counts[p].guests += 1;
+                 });
+               }
+            });
+            setPartCounts(counts);
           }
         }
 
@@ -79,8 +99,15 @@ export default function Home() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="w-8 h-8 text-blue-600 animate-spin" /></div>;
   if (!eventData) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><p className="text-gray-500 font-medium">Aucun événement actif.</p></div>;
 
-  const isPastDeadline = new Date() > new Date(eventData.deadline);
-  const isGuestsFull = eventData.total_guest_limit !== null && guestsCount >= eventData.total_guest_limit;
+  // CORRECTION DU BUG DEADLINE: Utilisation stricte du Timestamp local
+  const nowTime = new Date().getTime();
+  const deadlineTime = new Date(eventData.deadline).getTime();
+  const isPastDeadline = nowTime > deadlineTime;
+
+  // Limites Globales
+  const isTotalMembersFull = eventData.total_member_limit !== null && totalMembersCount >= eventData.total_member_limit;
+  const isTotalGuestsFull = eventData.total_guest_limit !== null && totalGuestsCount >= eventData.total_guest_limit;
+  const isFormLocked = isPastDeadline || isTotalMembersFull;
 
   return (
     <main className="min-h-screen bg-slate-50 py-10 px-4 font-sans flex flex-col items-center">
@@ -123,15 +150,6 @@ export default function Home() {
           </div>
         )}
 
-        {eventData.main_paragraph && (
-          <div className="border border-gray-200 rounded-2xl overflow-hidden mt-6">
-            <button onClick={() => setExpandedEvent(expandedEvent === 1 ? null : 1)} className="w-full p-4 bg-gray-50 flex items-center justify-between text-sm font-bold text-gray-700 hover:bg-gray-100 transition-colors">
-              Lire l'invitation complète {expandedEvent === 1 ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-            {expandedEvent === 1 && <div className="p-4 bg-white text-sm text-gray-700 whitespace-pre-line border-t">{eventData.main_paragraph.replace(/\\n/g, "\n")}</div>}
-          </div>
-        )}
-
         <hr className="my-6 border-gray-100" />
 
         {submitted ? (
@@ -139,11 +157,11 @@ export default function Home() {
             <CheckCircle className="w-10 h-10 text-green-600 mx-auto" />
             <h3 className="text-lg font-bold text-green-900">Présence confirmée !</h3>
           </div>
-        ) : isPastDeadline ? (
+        ) : isFormLocked ? (
           <div className="p-6 bg-gray-50 border border-gray-200 rounded-2xl text-center space-y-2">
             <Lock className="w-10 h-10 text-gray-400 mx-auto" />
-            <h3 className="text-lg font-bold text-gray-700">Inscriptions Fermées</h3>
-            <p className="text-sm text-gray-500">La date limite de confirmation est dépassée.</p>
+            <h3 className="text-lg font-bold text-gray-700">{isPastDeadline ? "Inscriptions Fermées" : "Événement Complet"}</h3>
+            <p className="text-sm text-gray-500">{isPastDeadline ? "La date limite est dépassée." : "Toutes les places globales ont été réservées."}</p>
           </div>
         ) : (
           <form className="space-y-4" onSubmit={handleConfirm}>
@@ -155,19 +173,29 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-3">
               {eventData.event_parts?.map((part) => {
                 const isChecked = selectedParts.includes(part.name);
+                
+                // VERIFICATION DES LIMITES POUR CETTE PARTIE SPECIFIQUE
+                const currentPartMembers = partCounts[part.name]?.members || 0;
+                const isPartMemberFull = part.memberLimit && currentPartMembers >= part.memberLimit;
+                
+                // Si la partie est pleine et qu'il ne l'a pas déjà cochée, on la désactive
+                const isDisabled = isPartMemberFull && !isChecked;
+
                 return (
-                  <label key={part.name} className={`flex flex-col items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${isChecked ? 'border-blue-600 bg-blue-50' : 'border-gray-100 hover:border-blue-300'}`}>
-                    <input type="checkbox" checked={isChecked} onChange={() => togglePart(part.name)} className="w-5 h-5 text-blue-600 mb-2" /> 
+                  <label key={part.name} className={`flex flex-col items-center justify-center p-4 border-2 rounded-xl transition-all relative ${isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-100' : isChecked ? 'border-blue-600 bg-blue-50 cursor-pointer' : 'border-gray-100 hover:border-blue-300 cursor-pointer'}`}>
+                    {isDisabled && <Lock className="absolute top-2 right-2 w-3 h-3 text-red-500" />}
+                    <input type="checkbox" checked={isChecked} onChange={() => { if(!isDisabled) togglePart(part.name) }} disabled={isDisabled} className="w-5 h-5 text-blue-600 mb-2" /> 
                     <span className="font-bold text-gray-700 text-sm text-center">{part.name}</span>
                     <span className="text-xs text-blue-600 font-semibold mt-1">{part.memberPrice} DT</span>
+                    {part.memberLimit && <span className="text-[10px] text-gray-400 mt-1">{Math.max(0, part.memberLimit - currentPartMembers)} places</span>}
                   </label>
                 );
               })}
             </div>
 
             {eventData.guests_allowed && (
-              isGuestsFull ? (
-                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-center text-xs font-bold text-orange-700">La limite d'invités pour cet événement a été atteinte.</div>
+              isTotalGuestsFull ? (
+                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-center text-xs font-bold text-orange-700">La limite globale d'invités a été atteinte.</div>
               ) : (
                 <input type="text" placeholder="Nom de votre invité (Optionnel)" value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full border-2 border-gray-200 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none font-medium" />
               )
