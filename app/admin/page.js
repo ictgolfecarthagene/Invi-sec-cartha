@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw } from "lucide-react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw, Link as LinkIcon } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -44,7 +44,6 @@ export default function AdminDashboard() {
   const [guestsAllowed, setGuestsAllowed] = useState(false);
   const [totalGuestLimit, setTotalGuestLimit] = useState("");
   
-  // NOUVEAU: Ajout des limites par parties
   const [parts, setParts] = useState([{ name: "Programme", memberPrice: 0, guestPrice: 0, memberLimit: "", guestLimit: "" }]);
   const [template, setTemplate] = useState("Aslemaa ,\nVoici la liste des participants pour [EVENT_NAME]\n\n[LIST]\n\nBonne chance 🫶");
 
@@ -105,7 +104,6 @@ export default function AdminDashboard() {
       if (data.hostClubs) setSelectedClubs(Array.isArray(data.hostClubs) ? data.hostClubs : [data.hostClubs]);
       if (data.guestsAllowed !== undefined) setGuestsAllowed(data.guestsAllowed);
       
-      // Adaptation des parties de l'IA pour inclure les limites vides
       if (data.parts && data.parts.length > 0) {
         const aiParts = data.parts.map(p => ({ ...p, memberLimit: "", guestLimit: "" }));
         setParts(aiParts);
@@ -117,6 +115,12 @@ export default function AdminDashboard() {
     } finally {
       setIsParsing(false);
     }
+  };
+
+  const copyDirectLink = (id) => {
+    const url = `${window.location.origin}/?id=${id}`;
+    navigator.clipboard.writeText(url);
+    alert("✅ Lien direct copié : " + url);
   };
 
   if (!authenticated) {
@@ -145,7 +149,6 @@ export default function AdminDashboard() {
     if (!eventName || !deadline) return alert("Le nom de l'événement et la date limite sont requis.");
     setIsSaving(true);
     
-    // Nettoyage des parties pour convertir les strings vides en null
     const cleanParts = parts.map(p => ({
       ...p,
       memberLimit: p.memberLimit ? Number(p.memberLimit) : null,
@@ -309,6 +312,16 @@ export default function AdminDashboard() {
         </div>
 
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
+          <h2 className="font-bold text-xl mb-4 text-gray-800">Template de Message (Pour la Secrétaire)</h2>
+          <p className="text-xs text-gray-500 mb-4">Utilisez [EVENT_NAME] et [LIST] pour injecter les données automatiquement.</p>
+          <textarea 
+            value={template} 
+            onChange={(e) => setTemplate(e.target.value)} 
+            className="w-full h-32 bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm font-medium focus:outline-none focus:border-blue-500 resize-none"
+          />
+        </div>
+
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
           <div className="flex justify-between items-center mb-6 border-b pb-3">
             <h2 className="font-bold text-xl text-gray-800">Événements Existants</h2>
             {editingEventId && <button onClick={resetForm} className="text-sm bg-blue-100 text-blue-600 px-4 py-2 rounded-lg font-bold hover:bg-blue-200 flex items-center gap-2"><X className="w-4 h-4" /> Annuler l'édition</button>}
@@ -321,11 +334,14 @@ export default function AdminDashboard() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {eventsList.map(evt => (
-                <div key={evt.id} className={`p-5 border-2 rounded-2xl ${editingEventId === evt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+                <div key={evt.id} className={`p-5 border-2 rounded-2xl flex flex-col ${editingEventId === evt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
                   <h3 className="font-bold text-gray-900 truncate text-lg mb-2">{evt.event_name}</h3>
                   <p className="text-xs text-gray-500 flex items-center gap-1 mb-4"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
                   
-                  <div className="space-y-2">
+                  <div className="space-y-2 mt-auto">
+                    <button onClick={() => copyDirectLink(evt.id)} className="w-full bg-indigo-100 text-indigo-700 py-2 rounded-lg text-xs font-bold hover:bg-indigo-200 flex items-center justify-center gap-2">
+                      <LinkIcon className="w-4 h-4" /> Copier le Lien Direct
+                    </button>
                     <button onClick={() => openPreview(evt)} className="w-full bg-blue-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
                       <Eye className="w-4 h-4" /> Voir & Copier la liste
                     </button>
@@ -358,19 +374,14 @@ export default function AdminDashboard() {
                 <div><label className="text-xs font-bold text-gray-500 uppercase ml-1">Limite Globale (Membres)</label><input type="number" placeholder="Ex: 50 (Vide si illimité)" className="w-full border-2 border-gray-100 p-4 rounded-xl bg-gray-50 mt-1 font-bold" value={totalMemberLimit} onChange={e => setTotalMemberLimit(e.target.value)} /></div>
               </div>
             </div>
-            
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
-              <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">Clubs Organisateurs</h2>
-              <div className="h-64 overflow-y-auto border-2 border-gray-100 rounded-xl p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 custom-scrollbar">
-                {INTERACT_CLUBS.map(club => (
-                  <label key={club} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-gray-200/50 rounded-lg">
-                    <input type="checkbox" checked={selectedClubs.includes(club)} onChange={() => toggleClub(club)} className="w-5 h-5 text-blue-600 rounded border-gray-300" />
-                    <span className="text-sm font-semibold text-gray-700">{club}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
 
+            <div className="bg-gradient-to-br from-indigo-900 to-blue-900 p-8 rounded-3xl shadow-lg border border-indigo-700">
+              <h2 className="text-2xl font-black flex items-center gap-3 text-white mb-4"><Sparkles className="text-yellow-400 w-6 h-6" /> Assistant IA</h2>
+              <textarea value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Collez l'invitation ici..." className="w-full h-32 bg-white/10 border-2 border-indigo-400/50 p-4 rounded-xl mb-6 text-white placeholder-indigo-300 focus:outline-none focus:border-yellow-400 resize-none" />
+              <button onClick={handleAIParsing} disabled={isParsing} className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-black text-lg py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-70 flex justify-center items-center gap-2">
+                {isParsing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} Auto-remplir avec l'IA
+              </button>
+            </div>
           </div>
 
           <div className="space-y-8">
@@ -388,7 +399,6 @@ export default function AdminDashboard() {
                       <div><label className="text-[10px] uppercase font-bold text-gray-500">Prix Invité (DT)</label><input type="number" value={part.guestPrice} onChange={(e) => updatePart(index, 'guestPrice', e.target.value)} className="w-full border border-gray-300 p-2 rounded-lg text-sm font-semibold" /></div>
                     </div>
                     
-                    {/* NOUVEAU: Limites spécifiques à cette partie */}
                     <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-200">
                       <div><label className="text-[10px] uppercase font-bold text-blue-600">Max Membres</label><input type="number" placeholder="Illimité" value={part.memberLimit} onChange={(e) => updatePart(index, 'memberLimit', e.target.value)} className="w-full border border-blue-200 bg-blue-50 p-2 rounded-lg text-sm font-semibold" /></div>
                       <div><label className="text-[10px] uppercase font-bold text-orange-600">Max Invités</label><input type="number" placeholder="Illimité" value={part.guestLimit} onChange={(e) => updatePart(index, 'guestLimit', e.target.value)} className="w-full border border-orange-200 bg-orange-50 p-2 rounded-lg text-sm font-semibold" /></div>
@@ -404,6 +414,18 @@ export default function AdminDashboard() {
               {guestsAllowed && (
                 <div><label className="text-xs font-bold text-gray-500 uppercase">Limite Globale (Invités)</label><input type="number" placeholder="Ex: 20 (vide si illimité)" className="w-full border-2 border-gray-100 p-3 rounded-xl bg-gray-50 mt-1 font-bold" value={totalGuestLimit} onChange={e => setTotalGuestLimit(e.target.value)} /></div>
               )}
+            </div>
+
+            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-200">
+              <h2 className="font-bold text-xl mb-6 text-gray-800 border-b pb-3">Clubs Organisateurs</h2>
+              <div className="h-64 overflow-y-auto border-2 border-gray-100 rounded-xl p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 custom-scrollbar">
+                {INTERACT_CLUBS.map(club => (
+                  <label key={club} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-gray-200/50 rounded-lg">
+                    <input type="checkbox" checked={selectedClubs.includes(club)} onChange={() => toggleClub(club)} className="w-5 h-5 text-blue-600 rounded border-gray-300" />
+                    <span className="text-sm font-semibold text-gray-700">{club}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <button onClick={handleSaveEvent} disabled={isSaving} className="bg-green-500 hover:bg-green-600 text-white w-full py-5 rounded-2xl font-black text-xl shadow-lg shadow-green-500/30 flex items-center justify-center gap-3">
