@@ -2,18 +2,17 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../lib/supabase";
-import { Calendar, MapPin, Users, ChevronDown, ChevronUp, Loader2, CheckCircle, Lock, Info } from "lucide-react";
+import { Calendar, MapPin, Users, ChevronDown, ChevronUp, Loader2, CheckCircle, Lock, Info, ExternalLink } from "lucide-react";
 
-// Sous-composant gérant CHAQUE événement indépendamment
 function EventCard({ eventData, members }) {
   const [expandedEvent, setExpandedEvent] = useState(null);
   
-  // Suivi des RSVPs
+  // RSVP Tracking
   const [totalMembersCount, setTotalMembersCount] = useState(0);
   const [totalGuestsCount, setTotalGuestsCount] = useState(0);
   const [partCounts, setPartCounts] = useState({}); 
 
-  // Formulaire
+  // Form State
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedParts, setSelectedParts] = useState([]);
   const [guestName, setGuestName] = useState("");
@@ -29,18 +28,17 @@ function EventCard({ eventData, members }) {
 
         const counts = {};
         rsvps.forEach(r => {
-           if(Array.isArray(r.selected_parts)) {
+           if (Array.isArray(r.selected_parts)) {
              r.selected_parts.forEach(p => {
-                if(!counts[p]) counts[p] = { members: 0, guests: 0 };
+                if (!counts[p]) counts[p] = { members: 0, guests: 0 };
                 counts[p].members += 1;
-                if(r.guest_name) counts[p].guests += 1;
+                if (r.guest_name) counts[p].guests += 1;
              });
            }
         });
         setPartCounts(counts);
       }
       
-      // Sélection par défaut de toutes les parties
       if (eventData.event_parts) {
         setSelectedParts(eventData.event_parts.map(p => p.name));
       }
@@ -64,9 +62,8 @@ function EventCard({ eventData, members }) {
     e.preventDefault();
     if (!selectedMember) return alert("Veuillez entrer et sélectionner votre nom dans la liste.");
     
-    // Sécurité: vérifier si le nom tapé existe vraiment dans la liste
     const memberExists = members.find(m => m.full_name === selectedMember);
-    if(!memberExists) return alert("Veuillez sélectionner un nom valide dans la liste déroulante.");
+    if (!memberExists) return alert("Veuillez sélectionner un nom valide dans la liste déroulante.");
 
     if (selectedParts.length === 0) return alert("Veuillez sélectionner au moins une partie.");
 
@@ -92,7 +89,7 @@ function EventCard({ eventData, members }) {
   const isTotalGuestsFull = eventData.total_guest_limit !== null && totalGuestsCount >= eventData.total_guest_limit;
   const isFormLocked = isPastDeadline || isTotalMembersFull;
 
-  // RENDU COMPACT (Si Deadline passée)
+  // COMPACT CARD FOR EXPIRED EVENTS
   if (isPastDeadline) {
     return (
       <div className="w-full bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 opacity-80">
@@ -107,7 +104,7 @@ function EventCard({ eventData, members }) {
     );
   }
 
-  // RENDU COMPLET (Si actif)
+  // FULL ACTIVE CARD
   return (
     <div className="w-full bg-white p-8 rounded-3xl shadow-sm border border-blue-100 space-y-6">
       <div className="flex justify-between items-start mb-4">
@@ -130,7 +127,34 @@ function EventCard({ eventData, members }) {
         </div>
       </div>
 
-      {/* Affichage clair du programme et des prix */}
+      {/* Google Maps Embed & Link */}
+      {eventData.location && (
+        <div className="mt-4 space-y-2">
+          <div className="flex justify-end">
+            <a 
+              href={eventData.location.startsWith('http') ? eventData.location : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(eventData.location)}`} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Ouvrir dans Google Maps
+            </a>
+          </div>
+          <div className="rounded-2xl overflow-hidden border border-gray-200 shadow-inner">
+            <iframe 
+              width="100%" 
+              height="200" 
+              frameBorder="0" 
+              style={{ border: 0 }} 
+              allowFullScreen
+              loading="lazy"
+              src={`https://maps.google.com/maps?q=${encodeURIComponent(eventData.location)}&output=embed`}
+            ></iframe>
+          </div>
+        </div>
+      )}
+
+      {/* Program & Tariffs */}
       {eventData.event_parts && eventData.event_parts.length > 0 && (
         <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
           <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Info className="w-4 h-4"/> Programme & Tarifs</h4>
@@ -139,6 +163,16 @@ function EventCard({ eventData, members }) {
               <li key={p.name}>• <b>{p.name}</b> : {p.memberPrice} DT (Membre) {eventData.guests_allowed && p.guestPrice > 0 ? `/ ${p.guestPrice} DT (Invité)` : ''}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Expandable Invitation Text */}
+      {eventData.main_paragraph && (
+        <div className="border border-gray-200 rounded-2xl overflow-hidden mt-4">
+          <button onClick={() => setExpandedEvent(expandedEvent === 1 ? null : 1)} className="w-full p-4 bg-gray-50 flex items-center justify-between text-sm font-bold text-gray-700 hover:bg-gray-100 transition-colors">
+            Lire l'invitation complète {expandedEvent === 1 ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          {expandedEvent === 1 && <div className="p-4 bg-white text-sm text-gray-700 whitespace-pre-line border-t">{eventData.main_paragraph.replace(/\\n/g, "\n")}</div>}
         </div>
       )}
 
@@ -158,7 +192,7 @@ function EventCard({ eventData, members }) {
       ) : (
         <form className="space-y-4" onSubmit={handleConfirm}>
           
-          {/* Menu de recherche Datalist */}
+          {/* Datalist Searchable Input */}
           <div className="relative">
             <input 
               list={`members-list-${eventData.id}`}
@@ -183,7 +217,7 @@ function EventCard({ eventData, members }) {
               return (
                 <label key={part.name} className={`flex flex-col items-center justify-center p-4 border-2 rounded-xl transition-all relative ${isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-100' : isChecked ? 'border-blue-600 bg-blue-50 cursor-pointer' : 'border-gray-100 hover:border-blue-300 cursor-pointer'}`}>
                   {isDisabled && <Lock className="absolute top-2 right-2 w-3 h-3 text-red-500" />}
-                  <input type="checkbox" checked={isChecked} onChange={() => { if(!isDisabled) togglePart(part.name) }} disabled={isDisabled} className="w-5 h-5 text-blue-600 mb-2" /> 
+                  <input type="checkbox" checked={isChecked} onChange={() => { if (!isDisabled) togglePart(part.name); }} disabled={isDisabled} className="w-5 h-5 text-blue-600 mb-2" /> 
                   <span className="font-bold text-gray-700 text-sm text-center">{part.name}</span>
                   <span className="text-xs text-blue-600 font-semibold mt-1">{part.memberPrice} DT</span>
                   {part.memberLimit && <span className="text-[10px] text-gray-400 mt-1">{Math.max(0, part.memberLimit - currentPartMembers)} places</span>}
@@ -194,7 +228,7 @@ function EventCard({ eventData, members }) {
 
           {eventData.guests_allowed && (
             isTotalGuestsFull ? (
-              <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-center text-xs font-bold text-orange-700">La limite d'invités a été atteinte.</div>
+              <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-center text-xs font-bold text-orange-700">La limite globale d'invités a été atteinte.</div>
             ) : (
               <input type="text" placeholder="Nom de votre invité (Optionnel)" value={guestName} onChange={e => setGuestName(e.target.value)} className="w-full border-2 border-gray-200 p-4 rounded-xl bg-gray-50 focus:border-blue-500 outline-none font-medium" />
             )
@@ -209,7 +243,6 @@ function EventCard({ eventData, members }) {
   );
 }
 
-// Composant principal enveloppé dans Suspense pour gérer les URLs (/?id=...)
 function EventsLoader() {
   const [events, setEvents] = useState([]);
   const [members, setMembers] = useState([]);
@@ -222,11 +255,9 @@ function EventsLoader() {
     async function init() {
       setLoading(true);
       try {
-        // Fetch Members
         const { data: membersList } = await supabase.from("members").select("id, full_name").order("full_name", { ascending: true });
         if (membersList) setMembers(membersList);
 
-        // Fetch Events (Soit un événement spécifique, soit les 10 derniers)
         let query = supabase.from("manual_events").select("*").order("created_at", { ascending: false });
         if (eventId) query = query.eq('id', eventId);
         else query = query.limit(10);
