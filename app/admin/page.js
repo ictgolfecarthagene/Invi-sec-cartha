@@ -265,13 +265,43 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: "Rappel Interact", message: `Dernier rappel pour: ${evt.event_name}. Veuillez confirmer votre présence !` })
       });
+      
+      // CAPTURE DE LA VRAIE ERREUR
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await response.text();
+        throw new Error(`Code ${response.status} - Détail: ${text.substring(0, 150)}...`);
+      }
+
       const data = await response.json();
       if (data.success) alert(`✅ Notifications envoyées avec succès à ${data.sent} appareils !`);
       else alert("❌ Erreur: " + data.error);
     } catch (err) {
-      alert("❌ Impossible de contacter le serveur de notifications.");
+      console.error(err);
+      alert("❌ Problème de serveur: " + err.message);
     } finally {
       setIsNotifying(false);
+    }
+  };
+
+  const enableNotifications = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return alert("Push non supporté.");
+    setIsSubscribing(true);
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      const permission = await window.Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('Permission refusée');
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
+      });
+      const subData = JSON.parse(JSON.stringify(subscription));
+      await supabase.from('admin_subscriptions').insert([{ endpoint: subData.endpoint, p256dh: subData.keys.p256dh, auth: subData.keys.auth }]);
+      alert('✅ Notifications activées sur ce téléphone !');
+    } catch (error) {
+      alert("Erreur lors de l'activation des notifications.");
+    } finally {
+      setIsSubscribing(false);
     }
   };
 
