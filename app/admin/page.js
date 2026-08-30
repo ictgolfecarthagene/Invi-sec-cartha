@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw, Link as LinkIcon, Users } from "lucide-react";
+import { Lock, Settings, Save, Copy, Plus, Trash2, BellRing, Loader2, Sparkles, Edit, X, Calendar, Eye, RefreshCcw, Link as LinkIcon, Users, CheckCircle2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 const INTERACT_CLUBS = [
@@ -32,7 +32,6 @@ export default function AdminDashboard() {
   const [eventsList, setEventsList] = useState([]);
   const [editingEventId, setEditingEventId] = useState(null);
   
-  // Waitlist & Deletion States
   const [currentPreviewEvent, setCurrentPreviewEvent] = useState(null);
   const [previewRsvps, setPreviewRsvps] = useState([]);
 
@@ -52,7 +51,8 @@ export default function AdminDashboard() {
 
   const fetchEvents = async () => {
     setIsLoadingEvents(true);
-    const { data } = await supabase.from('manual_events').select('*').order('created_at', { ascending: false });
+    // On récupère les événements ET le statut de leurs RSVPs pour afficher les badges
+    const { data } = await supabase.from('manual_events').select('*, rsvps(id, is_waitlist, is_sent)').order('created_at', { ascending: false });
     if (data) setEventsList(data);
     setIsLoadingEvents(false);
   };
@@ -253,7 +253,6 @@ export default function AdminDashboard() {
     
     await supabase.from('rsvps').delete().eq('id', rsvp.id);
     
-    // Promote the first waitlisted person if a confirmed spot opens up
     if (!rsvp.is_waitlist) {
       const { data: waitlisted } = await supabase
         .from('rsvps')
@@ -269,9 +268,11 @@ export default function AdminDashboard() {
       }
     }
     openPreview(currentPreviewEvent);
+    fetchEvents();
   };
 
-  const copyToClipboard = () => {
+  // NOUVELLE FONCTION COPIER & MARQUER COMME ENVOYÉ
+  const copyToClipboard = async () => {
     let listText = "Aucun participant pour le moment.";
     const confirmed = previewRsvps.filter(r => !r.is_waitlist);
     
@@ -286,7 +287,16 @@ export default function AdminDashboard() {
 
     let finalMessage = template.replace("[EVENT_NAME]", currentPreviewEvent.event_name).replace("[LIST]", listText);
     navigator.clipboard.writeText(finalMessage);
-    alert("✅ Liste des CONFIRMÉS copiée dans le presse-papiers !");
+    
+    // Marquer les non-envoyés comme envoyés !
+    const unsentIds = confirmed.filter(r => !r.is_sent).map(r => r.id);
+    if (unsentIds.length > 0) {
+        await supabase.from('rsvps').update({ is_sent: true }).in('id', unsentIds);
+        await fetchEvents(); 
+        await openPreview(currentPreviewEvent); 
+    }
+
+    alert("✅ Liste copiée et les participants ont été marqués comme 'Envoyés' !");
   };
 
   const sendReminder = async (evt) => {
@@ -340,7 +350,6 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans relative">
       
-      {/* Waitlist and Deletion Modal */}
       {currentPreviewEvent && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative max-h-[90vh] flex flex-col">
@@ -353,8 +362,12 @@ export default function AdminDashboard() {
                  {previewRsvps.filter(r => !r.is_waitlist).length === 0 ? <p className="text-sm text-gray-500 italic">Aucun membre confirmé pour le moment.</p> : previewRsvps.filter(r => !r.is_waitlist).map(r => (
                     <div key={r.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl mb-2 border border-gray-100">
                        <div>
-                         <p className="font-bold text-sm text-gray-800">{r.member_name}</p>
-                         <p className="text-xs text-gray-500">{Array.isArray(r.selected_parts) ? r.selected_parts.join(', ') : r.selected_parts} {r.guest_name && ` | Invité: ${r.guest_name}`}</p>
+                         <p className="font-bold text-sm text-gray-800">
+                            {r.member_name} 
+                            {/* Affichage du badge Envoyé/Nouveau */}
+                            {r.is_sent ? <span className="ml-2 text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-md">✅ Envoyé</span> : <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md">🆕 Nouveau</span>}
+                         </p>
+                         <p className="text-xs text-gray-500 mt-1">{Array.isArray(r.selected_parts) ? r.selected_parts.join(', ') : r.selected_parts} {r.guest_name && ` | Invité: ${r.guest_name}`}</p>
                        </div>
                        <button onClick={() => handleDeleteRSVP(r)} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"><Trash2 className="w-4 h-4"/></button>
                     </div>
@@ -377,7 +390,7 @@ export default function AdminDashboard() {
 
             <div className="mt-6 pt-4 border-t">
               <button onClick={copyToClipboard} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-lg py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 transition-transform active:scale-95">
-                <Copy className="w-5 h-5"/> Copier la liste confirmée
+                <Copy className="w-5 h-5"/> Copier & Marquer comme Envoyé
               </button>
             </div>
           </div>
@@ -420,10 +433,25 @@ export default function AdminDashboard() {
             <p className="text-gray-500 text-sm italic">Aucun événement trouvé.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {eventsList.map(evt => (
+              {eventsList.map(evt => {
+                
+                // Calcul pour les badges "Alerte Nouveaux"
+                const confirmedRsvps = evt.rsvps ? evt.rsvps.filter(r => !r.is_waitlist) : [];
+                const unsentCount = confirmedRsvps.filter(r => !r.is_sent).length;
+
+                return (
                 <div key={evt.id} className={`p-5 border-2 rounded-2xl flex flex-col ${editingEventId === evt.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
                   <h3 className="font-bold text-gray-900 truncate text-lg mb-2">{evt.event_name}</h3>
-                  <p className="text-xs text-gray-500 flex items-center gap-1 mb-4"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
+                  
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-xs text-gray-500 flex items-center gap-1"><Calendar className="w-3 h-3"/> {evt.event_date || "Date non définie"}</p>
+                    {/* LE BADGE DE STATUT */}
+                    {confirmedRsvps.length > 0 && (
+                      <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${unsentCount > 0 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                        {unsentCount > 0 ? `⚠️ ${unsentCount} nouveau(x)` : '✅ À jour'}
+                      </span>
+                    )}
+                  </div>
                   
                   <div className="space-y-2 mt-auto">
                     <button onClick={() => copyDirectLink(evt.id)} className="w-full bg-indigo-100 text-indigo-700 py-2 rounded-lg text-xs font-bold hover:bg-indigo-200 flex items-center justify-center gap-2">
@@ -441,7 +469,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </div>
